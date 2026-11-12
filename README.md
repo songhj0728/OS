@@ -151,6 +151,20 @@ Set-ExecutionPolicy -Scope Process Bypass
   - `-BypassHardwareCheck`: TPM 검사 등을 우회. 발로란트를 못 쓰게 되고, MS가 업데이트를 보장하지 않음
   - `-NoChrome`: Chrome을 넣지 않음 (이 경우 Edge도 제거하지 않음)
 
+### 빠르게 반복 테스트하기
+- **빠른 빌드:** `.\build\Build-LiteWin.ps1 -Fast`
+  - 중간 결과를 `C:\LiteWinWork\cache`에 저장해 두고 다음 빌드부터 재사용합니다. 재사용 대상은 ISO 내용, Pro 이미지, 앱 제거·레지스트리·Edge 제거까지 끝난 이미지, 내려받은 설치 파일(7일간)입니다.
+  - 지우는 앱 목록이나 레지스트리 정책을 바꾼 경우에만 그 단계를 다시 합니다.
+  - 구성요소 정리와 최대 압축을 생략하므로 ISO가 조금 커집니다. 배포용 ISO는 `-Fast` 없이 만드세요.
+  - 캐시는 10GB 안팎을 차지합니다. `cache` 폴더를 지우면 처음부터 다시 만듭니다.
+- **재설치 없이 반영:** 설치된 VM 안에서 `tools\Update-LiteWinFromRepo.ps1`을 실행하면, 설정 앱·셸·맥 단축키·구성요소 관리자 수정분만 바꿔 넣습니다.
+  - VMware라면 공유 폴더에 이 저장소를 추가한 뒤, VM의 관리자 PowerShell에서 실행합니다.
+    ```powershell
+    powershell -ExecutionPolicy Bypass -File "\\vmware-host\Shared Folders\OS\tools\Update-LiteWinFromRepo.ps1" -OpenSettings
+    ```
+  - 설치 마지막 단계 스크립트(`setup`)를 고쳤다면 `-RunSetup`을 붙입니다.
+  - 첫 로그인 직후에 VM 스냅샷을 하나 만들어 두면, 언제든 깨끗한 상태로 돌아가 다시 확인할 수 있습니다.
+
 ### 설치 이미지에 미리 넣는 프로그램
 빌드할 때 `winget download`로 받습니다. 받은 설치 파일은 winget 매니페스트의 SHA-256 해시로 검증하고, 설치 중에 인터넷 없이 무인 설치합니다.
 

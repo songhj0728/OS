@@ -34,6 +34,9 @@
 .PARAMETER SplitForFat32     install.wim 이 4GB 를 넘으면 install.swm 으로 분할 (FAT32 USB 용)
 .PARAMETER OscdimgPath       oscdimg.exe 경로 (기본: ADK 설치 경로 자동 탐색)
 .PARAMETER NoIso             ISO 를 만들지 않고 WorkDir\iso 폴더까지만 (Rufus 등으로 직접 USB 굽기)
+.PARAMETER Fast              빠른 빌드(테스트용). WorkDir\cache 에 중간 결과를 저장해 다음 빌드부터 재사용:
+                             ISO 풀기/Pro 추출, 앱 제거·레지스트리·Edge 제거까지 끝난 이미지, 내려받은 설치 파일(7일).
+                             구성요소 정리(ResetBase)와 최대 압축을 생략한다 → ISO 가 조금 크다. 배포용은 -Fast 없이.
 .PARAMETER NoChrome          Chrome 을 넣지 않음 (Edge 도 제거하지 않음)
 
 .EXAMPLE
@@ -57,6 +60,7 @@ param(
     [string]$OscdimgPath,
     [switch]$NoIso,
     [switch]$NoChrome,
+    [switch]$Fast,
     [switch]$KeepWorkDir
 )
 
@@ -96,10 +100,14 @@ function Save-WingetPayloads([string]$Dest) {
     if (-not $winget) { Warn 'winget 이 없어 설치 파일을 미리 넣지 못합니다 (첫 로그인 후 인터넷으로 설치됨)'; return @() }
     $result = @()
     foreach ($p in $Payloads) {
-        $dir = Join-Path $tmpDir "payload-$($p.Name)"
+        $dir = Join-Path $(if ($Fast) { $dlCache } else { $tmpDir }) "payload-$($p.Name)"
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
-        & $winget download --id $p.Id --exact --source winget --download-directory $dir `
-            --accept-package-agreements --accept-source-agreements --disable-interactivity | Out-Null
+        $have = Get-ChildItem $dir -File | Where-Object { $_.Extension -in '.exe', '.msi' } | Select-Object -First 1
+        if (-not ($Fast -and $have -and (Test-FreshFile $have.FullName))) {
+            Get-ChildItem $dir -File | Remove-Item -Force
+            & $winget download --id $p.Id --exact --source winget --download-directory $dir `
+                --accept-package-agreements --accept-source-agreements --disable-interactivity | Out-Null
+        }
         $installer = Get-ChildItem $dir -File | Where-Object { $_.Extension -in '.exe', '.msi' } | Select-Object -First 1
         $yaml = Get-ChildItem $dir -File -Filter *.yaml | Select-Object -First 1
         if (-not $installer) { Warn "$($p.Id): 다운로드 실패 — 건너뜀"; continue }
@@ -194,6 +202,49 @@ function Test-Prefix([string]$name, $patterns) {
 $isoDir   = Join-Path $WorkDir 'iso'
 $mountDir = Join-Path $WorkDir 'mount'
 $tmpDir   = Join-Path $WorkDir 'tmp'
+
+# ---- 빠른 빌드 캐시 (-Fast) ----
+$cacheDir = Join-Path $WorkDir 'cache'
+$dlCache  = Join-Path $cacheDir 'downloads'
+function Get-ShortHash([string]$text) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    (-join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($text)) | ForEach-Object { $_.ToString('x2') })).Substring(0, 12)
+}
+function Test-FreshFile([string]$path, [int]$days = 7) {
+    (Test-Path $path) -and ((Get-Item $path).LastWriteTime -gt (Get-Date).AddDays(-$days)) -and ((Get-Item $path).Length -gt 0)
+}
+$isoItem   = Get-Item (Resolve-Path $IsoPath).Path
+$isoKey    = Get-ShortHash "$($isoItem.FullName)|$($isoItem.Length)|$($isoItem.LastWriteTimeUtc.Ticks)"
+$baseCache = Join-Path $cacheDir "base-$isoKey"
+# 이미지 단계(앱 제거/레지스트리/Edge)에 영향을 주는 것만 모아 키를 만든다 → 이 중 하나라도 바뀌면 그 단계를 다시 한다
+$stageInput = @(
+    $isoKey, [bool]$BypassHardwareCheck
+    ($cfg.RemoveAppx -join ','), ($cfg.KeepAppx -join ','), ($cfg.RemoveCapabilities -join ','), ($cfg.KeepCapabilities -join ',')
+    ($cfg.DisableFeatures -join ','), $cfg.RemoveOneDrive, $cfg.RemoveEdge
+    (Get-FileHash (Join-Path $PSScriptRoot 'OfflineTweaks.ps1')).Hash
+    (Get-FileHash (Join-Path $PSScriptRoot 'OfflineEdge.ps1')).Hash
+    (Get-FileHash (Join-Path $PSScriptRoot 'OfflineRegAccess.ps1')).Hash
+) -join '|'
+$stageWim = Join-Path $cacheDir ("stage-{0}.wim" -f (Get-ShortHash $stageInput))
+$baseHit  = [bool]$Fast -and (Test-Path (Join-Path $baseCache 'meta.json'))
+$stageHit = $baseHit -and (Test-Path $stageWim)
+if ($Fast) {
+    $cfg.ResetBase = $false
+    New-Item -ItemType Directory -Path $cacheDir, $dlCache -Force | Out-Null
+}
+
+function Save-MountedImage {
+    # 이 프로세스가 이미지 안 파일을 붙잡고 있지 않도록 정리 후, 잠깐 기다리며 재시도
+    [GC]::Collect(); [GC]::WaitForPendingFinalizers()
+    for ($try = 1; ; $try++) {
+        try { Dismount-WindowsImage -Path $mountDir -Save -ErrorAction Stop | Out-Null; return }
+        catch {
+            if ($try -ge 3) { throw "마운트 해제 실패: $($_.Exception.Message) — 백신 실시간 검사나 탐색기 창이 $mountDir 안을 열고 있지 않은지 확인하세요." }
+            Warn "마운트 해제 재시도 ($try/3): $($_.Exception.Message)"
+            Start-Sleep -Seconds 10; [GC]::Collect()
+        }
+    }
+}
 $mounted  = $false
 $hives    = New-Object System.Collections.Generic.List[string]
 
@@ -250,19 +301,27 @@ try {
     foreach ($d in $isoDir, $tmpDir) { if (Test-Path $d) { Remove-Item $d -Recurse -Force } }
     New-Item -ItemType Directory -Path $isoDir, $mountDir, $tmpDir -Force | Out-Null
 
-    Step "ISO 복사: $IsoPath"
-    $disk = Mount-DiskImage -ImagePath (Resolve-Path $IsoPath).Path -PassThru
-    try {
-        $letter = ($disk | Get-Volume).DriveLetter
-        & robocopy.exe "$($letter):\" $isoDir /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
-        if ($LASTEXITCODE -ge 8) { throw "ISO 복사 실패 (robocopy $LASTEXITCODE)" }
-    } finally {
-        Dismount-DiskImage -ImagePath (Resolve-Path $IsoPath).Path | Out-Null
+    if ($baseHit) {
+        Step '빠른 빌드: 캐시된 ISO 내용 사용'
+        & robocopy.exe (Join-Path $baseCache 'iso') $isoDir /E /MT:16 /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+        if ($LASTEXITCODE -ge 8) { throw "캐시 복사 실패 (robocopy $LASTEXITCODE)" }
+    } else {
+        Step "ISO 복사: $IsoPath"
+        $disk = Mount-DiskImage -ImagePath (Resolve-Path $IsoPath).Path -PassThru
+        try {
+            $letter = ($disk | Get-Volume).DriveLetter
+            & robocopy.exe "$($letter):\" $isoDir /E /MT:16 /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+            if ($LASTEXITCODE -ge 8) { throw "ISO 복사 실패 (robocopy $LASTEXITCODE)" }
+        } finally {
+            Dismount-DiskImage -ImagePath (Resolve-Path $IsoPath).Path | Out-Null
+        }
+        Get-ChildItem $isoDir -Recurse -File | ForEach-Object { $_.IsReadOnly = $false }
     }
-    Get-ChildItem $isoDir -Recurse -File | ForEach-Object { $_.IsReadOnly = $false }
 
-    $chromeMsi = Join-Path $tmpDir 'chrome.msi'
-    if ($cfg.IncludeChrome) {
+    $chromeMsi = Join-Path $(if ($Fast) { $dlCache } else { $tmpDir }) 'chrome.msi'
+    if ($cfg.IncludeChrome -and $Fast -and (Test-FreshFile $chromeMsi)) {
+        Info 'Chrome 설치 파일: 캐시 사용'
+    } elseif ($cfg.IncludeChrome) {
         Step 'Chrome 기업용 설치 파일 다운로드 (Google 공식)'
         Invoke-WebRequest -UseBasicParsing -Uri $ChromeMsiUrl -OutFile $chromeMsi
         $sig = Get-AuthenticodeSignature $chromeMsi
@@ -273,31 +332,51 @@ try {
     }
 
     # ========================================================== 3. Pro 이미지 추출
-    Step 'Pro 에디션 찾기'
     $srcWim = Join-Path $isoDir 'sources\install.wim'
     $srcEsd = Join-Path $isoDir 'sources\install.esd'
-    $src = if (Test-Path $srcWim) { $srcWim } elseif (Test-Path $srcEsd) { $srcEsd } else { throw 'install.wim/esd 가 없습니다. 공식 Windows 11 ISO 인지 확인하세요.' }
-
-    $pro = $null
-    foreach ($img in Get-WindowsImage -ImagePath $src) {
-        $d = Get-WindowsImage -ImagePath $src -Index $img.ImageIndex
-        Info ("[{0}] {1} ({2}, {3})" -f $d.ImageIndex, $d.ImageName, $d.EditionId, $d.Architecture)
-        if ($d.EditionId -eq 'Professional') { $pro = $d }
-    }
-    if (-not $pro) { throw 'Pro(Professional) 에디션이 없는 ISO 입니다.' }
-    if ($pro.Architecture -ne 9) { throw 'x64 이미지가 아닙니다.' }   # 9 = amd64
-    $uiLang = @($pro.Languages)[$pro.DefaultLanguageIndex]
-    Info "선택: [$($pro.ImageIndex)] $($pro.ImageName) / 언어 $uiLang / 빌드 $($pro.Version)"
-
     $workWim = Join-Path $tmpDir 'pro.wim'
-    Export-WindowsImage -SourceImagePath $src -SourceIndex $pro.ImageIndex `
-        -DestinationImagePath $workWim -CompressionType max -CheckIntegrity | Out-Null
+    if ($baseHit) {
+        $meta = Get-Content (Join-Path $baseCache 'meta.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        $uiLang = $meta.UiLang
+        Step "빠른 빌드: 캐시된 이미지 사용 ($($meta.ImageName), 빌드 $($meta.Version))"
+        if ($stageHit) { Info '앱 제거/레지스트리/Edge 제거까지 끝난 이미지를 재사용합니다'; Copy-Item $stageWim $workWim -Force }
+        else { Info '제거 목록이나 레지스트리 정책이 바뀌어 이미지 단계를 다시 진행합니다'; Copy-Item (Join-Path $baseCache 'pro.wim') $workWim -Force }
+    } else {
+        Step 'Pro 에디션 찾기'
+        $src = if (Test-Path $srcWim) { $srcWim } elseif (Test-Path $srcEsd) { $srcEsd } else { throw 'install.wim/esd 가 없습니다. 공식 Windows 11 ISO 인지 확인하세요.' }
+
+        $pro = $null
+        foreach ($img in Get-WindowsImage -ImagePath $src) {
+            $d = Get-WindowsImage -ImagePath $src -Index $img.ImageIndex
+            Info ("[{0}] {1} ({2}, {3})" -f $d.ImageIndex, $d.ImageName, $d.EditionId, $d.Architecture)
+            if ($d.EditionId -eq 'Professional') { $pro = $d }
+        }
+        if (-not $pro) { throw 'Pro(Professional) 에디션이 없는 ISO 입니다.' }
+        if ($pro.Architecture -ne 9) { throw 'x64 이미지가 아닙니다.' }   # 9 = amd64
+        $uiLang = @($pro.Languages)[$pro.DefaultLanguageIndex]
+        Info "선택: [$($pro.ImageIndex)] $($pro.ImageName) / 언어 $uiLang / 빌드 $($pro.Version)"
+
+        Export-WindowsImage -SourceImagePath $src -SourceIndex $pro.ImageIndex `
+            -DestinationImagePath $workWim -CompressionType $(if ($Fast) { 'fast' } else { 'max' }) -CheckIntegrity | Out-Null
+
+        if ($Fast) {
+            Step '빠른 빌드: 원본(ISO 내용 + Pro 이미지)을 캐시에 저장'
+            Get-ChildItem $cacheDir -Directory -Filter 'base-*' | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+            Get-ChildItem $cacheDir -File -Filter 'stage-*.wim' | Remove-Item -Force -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Path (Join-Path $baseCache 'iso') -Force | Out-Null
+            & robocopy.exe $isoDir (Join-Path $baseCache 'iso') /E /MT:16 /XF install.wim install.esd /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+            Copy-Item $workWim (Join-Path $baseCache 'pro.wim') -Force
+            @{ UiLang = $uiLang; Version = "$($pro.Version)"; ImageName = $pro.ImageName } | ConvertTo-Json |
+                Set-Content (Join-Path $baseCache 'meta.json') -Encoding UTF8    # 마지막에 써서 '완성' 표시
+        }
+    }
 
     # ========================================================== 4. 마운트
     Step '이미지 마운트'
     Mount-WindowsImage -ImagePath $workWim -Index 1 -Path $mountDir | Out-Null
     $mounted = $true
 
+    if (-not $stageHit) {
     # ========================================================== 5. 앱 제거
     Step '기본 앱(AppX) 제거'
     foreach ($pkg in Get-AppxProvisionedPackage -Path $mountDir) {
@@ -373,6 +452,17 @@ try {
     } finally {
         Dismount-Hives
     }
+    }   # if (-not $stageHit)
+
+    if ($Fast -and -not $stageHit) {
+        Step '빠른 빌드: 정리된 이미지를 캐시에 저장 (다음 빌드부터 앱 제거/레지스트리 단계 생략)'
+        Save-MountedImage
+        $mounted = $false
+        Get-ChildItem $cacheDir -File -Filter 'stage-*.wim' | Remove-Item -Force -ErrorAction SilentlyContinue
+        Copy-Item $workWim $stageWim -Force
+        Mount-WindowsImage -ImagePath $workWim -Index 1 -Path $mountDir | Out-Null
+        $mounted = $true
+    }
 
     # ========================================================== 7. 설치 후 스크립트 삽입
     Step '설치 후 스크립트 / LiteWin 설정 앱 / 맥 스타일 파일 복사'
@@ -407,10 +497,17 @@ try {
     $payloadList = @(Save-WingetPayloads -Dest (Join-Path $lw 'payload'))
     # ExplorerPatcher (Win10 클래식 작업표시줄) — GitHub 공식 릴리스, 배포 후 7일 지난 버전, SHA-256 확인
     try {
-        $epRel = Get-GitHubRelease -Repo $script:EPRepo -Asset $script:EPAsset -DelayDays 7
+        $epCached = Join-Path $dlCache 'ep_setup.exe'
+        $epUseCache = [bool]$Fast -and (Test-FreshFile $epCached)
+        $epRel = if ($epUseCache) { [pscustomobject]@{ Tag = '캐시'; Sha256 = 'cached' } }
+                 else { Get-GitHubRelease -Repo $script:EPRepo -Asset $script:EPAsset -DelayDays 7 }
         if ($epRel) {
             $epFile = Join-Path $lw 'payload\ep_setup.exe'
-            $h = Save-VerifiedAsset -Release $epRel -OutFile $epFile -AllowUnverified
+            if ($epUseCache) { Copy-Item $epCached $epFile -Force; $h = 'cached' }
+            else {
+                $h = Save-VerifiedAsset -Release $epRel -OutFile $epFile -AllowUnverified
+                if ($Fast) { Copy-Item $epFile $epCached -Force }
+            }
             if (-not $epRel.Sha256) { Warn "ExplorerPatcher $($epRel.Tag): 배포처 해시 없음 — SHA-256 $h 를 릴리스 페이지와 직접 비교하세요" }
             $payloadList += [ordered]@{ Name = 'explorerpatcher'; Id = $script:EPRepo; File = 'ep_setup.exe'; Type = 'exe'; Args = ''; Keep = $true }
             Info ("explorerpatcher: {0} ({1:N1}MB)" -f $epRel.Tag, ((Get-Item $epFile).Length / 1MB))
@@ -478,23 +575,19 @@ try {
     }
 
     Step '이미지 저장 및 마운트 해제'
-    # 이 프로세스가 이미지 안 파일을 붙잡고 있지 않도록 정리 후, 잠깐 기다리며 재시도
-    [GC]::Collect(); [GC]::WaitForPendingFinalizers()
-    for ($try = 1; ; $try++) {
-        try { Dismount-WindowsImage -Path $mountDir -Save -ErrorAction Stop | Out-Null; break }
-        catch {
-            if ($try -ge 3) { throw "마운트 해제 실패: $($_.Exception.Message) — 백신 실시간 검사나 탐색기 창이 $mountDir 안을 열고 있지 않은지 확인하세요." }
-            Warn "마운트 해제 재시도 ($try/3): $($_.Exception.Message)"
-            Start-Sleep -Seconds 10; [GC]::Collect()
-        }
-    }
+    Save-MountedImage
     $mounted = $false
 
-    Step '최대 압축으로 다시 내보내기'
     Remove-Item $srcWim, $srcEsd -Force -ErrorAction SilentlyContinue
-    Export-WindowsImage -SourceImagePath $workWim -SourceIndex 1 -DestinationImagePath $srcWim `
-        -CompressionType max -CheckIntegrity | Out-Null
-    Remove-Item $workWim -Force
+    if ($Fast) {
+        Step '빠른 빌드: 재압축 생략'
+        Move-Item $workWim $srcWim -Force
+    } else {
+        Step '최대 압축으로 다시 내보내기'
+        Export-WindowsImage -SourceImagePath $workWim -SourceIndex 1 -DestinationImagePath $srcWim `
+            -CompressionType max -CheckIntegrity | Out-Null
+        Remove-Item $workWim -Force
+    }
     $wimGB = (Get-Item $srcWim).Length / 1GB
     Info ("install.wim = {0:N2} GB" -f $wimGB)
 
@@ -531,7 +624,11 @@ try {
         & $OscdimgPath -m -o -u2 -udfver102 -lLITEWIN "-bootdata:2#p0,e,b$etfs#pEF,e,b$efi" $isoDir $OutputIso | Out-Host
         if ($LASTEXITCODE -ne 0) { throw "oscdimg 실패 ($LASTEXITCODE)" }
         Info ("ISO = {0:N2} GB" -f ((Get-Item $OutputIso).Length / 1GB))
-        if (-not $KeepWorkDir) { Remove-Item $WorkDir -Recurse -Force -ErrorAction SilentlyContinue }
+        if ($Fast) {
+            # 캐시(WorkDir\cache)는 남기고 임시 폴더만 지운다
+            foreach ($d in $isoDir, $tmpDir, $mountDir) { Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue }
+            Info "캐시: $cacheDir (지우면 다음 빌드는 처음부터)"
+        } elseif (-not $KeepWorkDir) { Remove-Item $WorkDir -Recurse -Force -ErrorAction SilentlyContinue }
     }
     Step ("끝 (소요 {0:hh\:mm\:ss})" -f $sw.Elapsed)
 }
