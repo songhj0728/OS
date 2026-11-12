@@ -1,0 +1,6 @@
+# Windows PowerShell 5.1 은 BOM 없는 UTF-8 을 ANSI(cp949)로 읽어 한글이 깨진다 → 파일에 BOM 유지, CRLF
+*.ps1  text eol=crlf
+*.psd1 text eol=crlf
+*.cmd  text eol=crlf
+*.ahk  text eol=crlf
+*.xml  text eol=crlf

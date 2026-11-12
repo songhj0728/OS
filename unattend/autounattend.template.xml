@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  LiteWin 자동 응답 파일 (템플릿). Build-LiteWin.ps1 이 {{...}} 를 채워 ISO 루트에 autounattend.xml 로 넣는다.
+
+  일부러 하지 않는 것:
+   - 디스크 자동 포맷/파티션: 실수로 다른 디스크를 지우지 않도록 설치 위치는 직접 고른다.
+   - 계정/비밀번호 하드코딩: OOBE 에서 로컬 계정을 직접 만든다(MS 계정 강제 화면은 숨김).
+   - 정품 키 포함: 아래 키는 Microsoft 가 공개한 Pro "에디션 선택용 일반 설치 키"이며 정품 인증은 되지 않는다.
+     설치 후 본인 Pro 라이선스(디지털 라이선스 자동 인식 또는 설정 > 정품 인증에서 키 입력)로 인증된다.
+-->
+<unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+  <settings pass="windowsPE">
+    <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <SetupUILanguage>
+        <UILanguage>{{UILANG}}</UILanguage>
+      </SetupUILanguage>
+      <InputLocale>{{INPUT}}</InputLocale>
+      <SystemLocale>{{LOCALE}}</SystemLocale>
+      <UILanguage>{{UILANG}}</UILanguage>
+      <UserLocale>{{LOCALE}}</UserLocale>
+    </component>
+    <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <UserData>
+        <AcceptEula>true</AcceptEula>
+        <ProductKey>
+          <Key>VK7JG-NPHTM-C97JM-9MPGT-3V66T</Key>
+          <WillShowUI>OnError</WillShowUI>
+        </ProductKey>
+      </UserData>
+      <!--BYPASS_PE-->
+    </component>
+  </settings>
+
+  <settings pass="oobeSystem">
+    <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <InputLocale>{{INPUT}}</InputLocale>
+      <SystemLocale>{{LOCALE}}</SystemLocale>
+      <UILanguage>{{UILANG}}</UILanguage>
+      <UserLocale>{{LOCALE}}</UserLocale>
+    </component>
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <TimeZone>{{TIMEZONE}}</TimeZone>
+      <OOBE>
+        <HideEULAPage>true</HideEULAPage>
+        <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
+        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+        <ProtectYourPC>3</ProtectYourPC>
+      </OOBE>
+      <FirstLogonCommands>
+        <SynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Description>LiteWin first logon (per-user tweaks, Mac style)</Description>
+          <CommandLine>powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Windows\Setup\Scripts\FirstLogon.ps1</CommandLine>
+          <RequiresUserInput>false</RequiresUserInput>
+        </SynchronousCommand>
+      </FirstLogonCommands>
+    </component>
+  </settings>
+</unattend>
