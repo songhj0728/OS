@@ -43,6 +43,7 @@ foreach ($t in $tools) {
         $cp.TreatWarningsAsErrors = $false
         $cp.WarningLevel = 0          # (-IgnoreWarnings 는 -CompilerParameters 와 같이 쓸 수 없음)
         $cp.ReferencedAssemblies.Add('System.dll') | Out-Null
+        $cp.ReferencedAssemblies.Add('System.Core.dll') | Out-Null   # HashSet, System.Dynamic (PowerShell 호스팅)
         foreach ($r in $t.Refs) { $cp.ReferencedAssemblies.Add($r) | Out-Null }
         $opts = '/target:winexe /optimize+'
         if ($t.Manifest) {
