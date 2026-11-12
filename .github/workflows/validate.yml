@@ -36,9 +36,14 @@ jobs:
         shell: powershell
         run: |
           $zip = Join-Path $env:RUNNER_TEMP 'ahk.zip'; $dir = Join-Path $env:RUNNER_TEMP 'ahk'
-          Invoke-WebRequest -UseBasicParsing https://www.autohotkey.com/download/ahk-v2.zip -OutFile $zip
+          # autohotkey.com 은 봇 차단(Cloudflare)이 있어 GitHub 공식 릴리스에서 받는다
+          $rel = Invoke-RestMethod -Headers @{ 'User-Agent' = 'litewin-ci' } https://api.github.com/repos/AutoHotkey/AutoHotkey/releases/latest
+          $asset = $rel.assets | Where-Object name -like 'AutoHotkey_2*.zip' | Select-Object -First 1
+          Write-Host "AutoHotkey $($rel.tag_name): $($asset.name)"
+          Invoke-WebRequest -UseBasicParsing $asset.browser_download_url -OutFile $zip
           Expand-Archive $zip $dir -Force
-          $p = Start-Process "$dir\AutoHotkey64.exe" -ArgumentList '/ErrorStdOut', '/validate', 'macstyle\MacKeys.ahk' -PassThru -NoNewWindow -RedirectStandardError "$env:RUNNER_TEMP\ahk.err"
+          $exe = Get-ChildItem $dir -Recurse -Filter AutoHotkey64.exe | Select-Object -First 1 -ExpandProperty FullName
+          $p = Start-Process $exe -ArgumentList '/ErrorStdOut', '/validate', 'macstyle\MacKeys.ahk' -PassThru -NoNewWindow -RedirectStandardError "$env:RUNNER_TEMP\ahk.err"
           if (-not $p.WaitForExit(30000)) { $p.Kill(); Write-Host '::warning::AutoHotkey /validate timed out (switch not supported?)'; exit 0 }
           $err = Get-Content "$env:RUNNER_TEMP\ahk.err" -Raw
           if ($p.ExitCode -ne 0 -or $err) { Write-Host "::error::$err"; exit 1 }

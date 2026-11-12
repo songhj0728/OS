@@ -117,7 +117,8 @@ function Set-NaturalMouseWheel {
 function Find-AutoHotkey {
     foreach ($c in "$env:ProgramFiles\AutoHotkey\v2\AutoHotkey64.exe",
                    "$env:LOCALAPPDATA\Programs\AutoHotkey\v2\AutoHotkey64.exe",
-                   "$env:ProgramFiles\AutoHotkey-v2\AutoHotkey64.exe") {
+                   "$env:ProgramFiles\AutoHotkey-v2\AutoHotkey64.exe",
+                   "$env:ProgramFiles\AutoHotkey-v2\v2\AutoHotkey64.exe") {
         if (Test-Path $c) { return $c }
     }
     return $null
@@ -130,11 +131,14 @@ function Install-AutoHotkey {
         $exe = Find-AutoHotkey
         if ($exe) { return $exe }
     }
-    Write-LWLog 'winget 실패 → AutoHotkey 공식 zip 으로 설치' WARN
+    # autohotkey.com 은 스크립트 다운로드를 봇 차단하므로 GitHub 공식 릴리스(AutoHotkey/AutoHotkey)에서 받는다
+    Write-LWLog 'winget 실패 → AutoHotkey GitHub 공식 릴리스 zip 으로 설치' WARN
     $zip  = Join-Path $env:TEMP 'ahk-v2.zip'
     $dest = "$env:ProgramFiles\AutoHotkey-v2"
-    Invoke-WebRequest -UseBasicParsing -Uri 'https://www.autohotkey.com/download/ahk-v2.zip' -OutFile $zip
-    $sig = $null
+    $rel = Invoke-RestMethod -UseBasicParsing -Headers @{ 'User-Agent' = 'LiteWin' } -Uri 'https://api.github.com/repos/AutoHotkey/AutoHotkey/releases/latest'
+    $asset = $rel.assets | Where-Object name -like 'AutoHotkey_2*.zip' | Select-Object -First 1
+    if (-not $asset) { return $null }
+    Invoke-WebRequest -UseBasicParsing -Uri $asset.browser_download_url -OutFile $zip
     Expand-Archive -Path $zip -DestinationPath $dest -Force
     Remove-Item $zip -Force
     $exe = Find-AutoHotkey
