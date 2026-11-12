@@ -73,3 +73,16 @@ jobs:
           $b = ConvertTo-MouseCurveBytes @(0.0, 0.43, 1.25, 3.86, 40.0)
           if ($b.Length -ne 40) { throw "curve bytes = $($b.Length)" }
           Write-Host 'OK'
+
+      - name: Components manager (ExplorerPatcher release lookup, no install)
+        shell: powershell
+        run: |
+          . .\lib\LiteWin.Components.ps1
+          if ((ConvertTo-EPVersion '22621.3880.66.6_92fce8c') -ne [version]'22621.3880.66.6') { throw 'version parse' }
+          $r = Get-GitHubRelease -Repo $script:EPRepo -Asset $script:EPAsset -DelayDays 7
+          if (-not $r) { throw 'no ExplorerPatcher release found' }
+          Write-Host "ExplorerPatcher $($r.Tag) published $($r.Published) sha256=$($r.Sha256)"
+          $f = Join-Path $env:RUNNER_TEMP 'ep_setup.exe'
+          $h = Save-VerifiedAsset -Release $r -OutFile $f -AllowUnverified
+          Write-Host "downloaded hash $h"
+          if ($r.Sha256 -and $h -ne $r.Sha256) { throw 'hash mismatch' }

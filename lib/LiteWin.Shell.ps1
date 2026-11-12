@@ -1,6 +1,6 @@
 ﻿<#
     LiteWin 셸 계층: 모드별로 화면 껍데기를 켜고 끈다.
-      라이트 / 맥 입력 : 클래식 작업표시줄(RetroBar) + Win7 시작 메뉴(Open-Shell)   ← Win11 작업표시줄 숨김
+      라이트 / 맥 입력 : 클래식 작업표시줄(ExplorerPatcher Win10, 예비 RetroBar) + Win7/Win10 시작 메뉴
       맥 입력 + UI     : Win11 작업표시줄(가운데) + Windhawk Dock(선택) + 창 버튼 오버레이(LiteWinCaption)
     Windows 쪽 작업표시줄/시작 메뉴는 지우지 않고 그대로 둔다(업데이트 안전). RetroBar 가 실행되면 자동으로 숨는다.
     로그인 시 app\Start-LiteWinShell.ps1 이 Start-LWShell 을 호출해 다시 적용한다 → 재부팅/로그아웃 후에도 유지.
@@ -27,7 +27,8 @@ function Get-OpenShellExe {
 function Get-LWShellOptions {
     <# 상태 파일의 Shell 옵션 + 기본값 #>
     param($State = (Get-LWState))
-    $o = [ordered]@{ ClassicTaskbar = $true; ClassicStart = $true; TaskbarLabels = $false; Caption = 'traffic' }
+    # ClassicEngine: ep = ExplorerPatcher Win10 작업표시줄 / retrobar,  StartEngine: openshell = Win7 / ep = Win10
+    $o = [ordered]@{ ClassicTaskbar = $true; ClassicEngine = 'ep'; ClassicStart = $true; StartEngine = 'openshell'; TaskbarLabels = $false; Caption = 'traffic' }
     if ($State.Shell) {
         foreach ($p in $State.Shell.PSObject.Properties) { $o[$p.Name] = $p.Value }
     }
@@ -93,30 +94,89 @@ function Set-NativeTaskbarStyle([ValidateSet('Classic', 'Mac')][string]$Style, [
     }
 }
 
+function Restart-Explorer {
+    Get-Process explorer -ErrorAction SilentlyContinue | Stop-Process -Force
+    Start-Sleep -Seconds 2
+    if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { Start-Process explorer.exe }
+}
+
+function Test-EPInstalled {
+    Test-Path "$env:ProgramFiles\ExplorerPatcher\ExplorerPatcher.amd64.dll"
+}
+
+function Test-ExplorerCrashLoop {
+    <# 최근 10분 안에 탐색기가 3번 이상 비정상 종료됐는지 (업데이트 후 ExplorerPatcher 비호환 등) #>
+    try {
+        $ev = Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Id = 1000; StartTime = (Get-Date).AddMinutes(-10) } -ErrorAction Stop |
+              Where-Object { $_.Message -match 'explorer\.exe' }
+        return (@($ev).Count -ge 3)
+    } catch { return $false }
+}
+
+function Set-EPValue([string]$Path, [string]$Name, [int]$Value) {
+    <# 값이 바뀌었으면 $true (탐색기 재시작 필요) #>
+    $cur = Get-RegValueEntry -Path $Path -Name $Name
+    if ($cur -and [int]$cur.Value -eq $Value) { return $false }
+    Set-RegValue $Path $Name $Value
+    return $true
+}
+
 function Start-LWShell {
     <#
-        .SYNOPSIS 현재 모드에 맞게 셸 구성요소를 실행/종료 (로그인 시 + 모드 전환 시)
-        .PARAMETER Apply  레지스트리 스타일 값까지 다시 쓴다(모드 전환 시). 로그인 때는 실행/종료만.
+        .SYNOPSIS 현재 모드에 맞게 셸 구성요소를 적용 (로그인 시 + 모드 전환 시)
+          클래식: ExplorerPatcher Win10 작업표시줄 (없거나 문제가 생기면 RetroBar) + Win7/Win10 시작 메뉴
+          맥    : Windows 11 작업표시줄(가운데) + 창 버튼 오버레이
+        .PARAMETER Apply           레지스트리 스타일 값까지 다시 쓴다(모드 전환 시)
+        .PARAMETER RestartExplorer 값이 그대로여도 탐색기를 다시 시작
     #>
-    param($State = (Get-LWState), [switch]$Apply)
+    param($State = (Get-LWState), [switch]$Apply, [switch]$RestartExplorer)
     $mode = if ($State.Mode) { $State.Mode } else { 'Lite' }
     $o = Get-LWShellOptions -State $State
     $mac = $mode -eq 'MacUI'
+    $ep = Test-EPInstalled
+    $restart = [bool]$RestartExplorer
+
+    # ---- ExplorerPatcher 문제 감지 → RetroBar 로 자동 전환 ----
+    if (-not $Apply -and $ep -and $o.ClassicEngine -eq 'ep' -and (Test-ExplorerCrashLoop)) {
+        Write-LWLog '탐색기 반복 종료 감지 → 클래식 작업표시줄을 RetroBar 로 전환' WARN
+        $o.ClassicEngine = 'retrobar'
+        $State | Add-Member -NotePropertyName Shell -NotePropertyValue $o -Force
+        Set-LWState $State
+        $restart = $true
+    }
+
+    $engine = 'none'
+    if (-not $mac -and $o.ClassicTaskbar) { $engine = if ($o.ClassicEngine -eq 'ep' -and $ep) { 'ep' } else { 'retrobar' } }
+    $epStart = $ep -and -not $mac -and $o.ClassicStart -and $o.StartEngine -eq 'ep'
 
     if ($Apply) { Set-NativeTaskbarStyle $(if ($mac) { 'Mac' } else { 'Classic' }) ([bool]$o.TaskbarLabels) }
 
-    # ---- 클래식 작업표시줄 (RetroBar) ----
+    # ---- ExplorerPatcher 설정 (HKCU) ----
+    if ($ep) {
+        $epKey = 'HKCU:\Software\ExplorerPatcher'
+        if (Set-EPValue $epKey 'OldTaskbar' $(if ($engine -eq 'ep') { 2 } else { 0 })) { $restart = $true }   # 2 = Windows 10 (ExplorerPatcher), 0 = Windows 11
+        [void](Set-EPValue $epKey 'UpdatePolicy' 2)                                                        # 2 = 자체 업데이트 확인 안 함 (LiteWin 이 관리)
+        $adv = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'
+        if (Set-EPValue $adv 'Start_ShowClassicMode' ([int]$epStart)) { $restart = $true }                  # 1 = Windows 10 시작 메뉴
+        if ($Apply -and $engine -eq 'ep') {
+            $glom = if ($o.TaskbarLabels) { 2 } else { 0 }
+            if (Set-EPValue $adv 'TaskbarGlomLevel' $glom) { $restart = $true }
+        }
+    }
+    if ($restart) { Restart-Explorer }
+
+    # ---- RetroBar (예비 클래식 작업표시줄) ----
     $rb = Get-RetroBarExe
-    if (-not $mac -and $o.ClassicTaskbar -and $rb) {
+    if ($engine -eq 'retrobar' -and $rb) {
         if (-not (Get-Process RetroBar -ErrorAction SilentlyContinue)) { Start-Process $rb }
     } else {
-        Stop-ProcessByPath 'RetroBar'   # 종료되면 Windows 작업표시줄이 다시 나타난다
+        Stop-ProcessByPath 'RetroBar'
     }
 
     # ---- Win7 시작 메뉴 (Open-Shell) ----
     $os = Get-OpenShellExe
     if ($os) {
-        $want = (-not $mac) -and [bool]$o.ClassicStart
+        $want = (-not $mac) -and [bool]$o.ClassicStart -and -not $epStart
         if ($Apply -or $want) { Set-OpenShellAutoStart $want }
         if ($want) {
             if (-not (Get-Process StartMenu -ErrorAction SilentlyContinue)) { Start-Process $os -ArgumentList '-autorun' }

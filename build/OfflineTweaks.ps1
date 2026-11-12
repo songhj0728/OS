@@ -76,6 +76,9 @@ $script:OfflineRegTweaks += @(
     # 작업표시줄 기본: 왼쪽 정렬, 단추는 아이콘만(펼쳐 보기는 LiteWin 설정의 옵션)
     @{ Hive='NTUSER'; Path='Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name='TaskbarAl'; Type='DWord'; Value=0 }
     @{ Hive='NTUSER'; Path='Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name='Start_TrackDocs'; Type='DWord'; Value=1 }
+    # ExplorerPatcher 기본값(새 사용자): Win10 작업표시줄, 자체 업데이트 알림 끔(LiteWin 이 관리)
+    @{ Hive='NTUSER'; Path='Software\ExplorerPatcher'; Name='OldTaskbar'; Type='DWord'; Value=2 }
+    @{ Hive='NTUSER'; Path='Software\ExplorerPatcher'; Name='UpdatePolicy'; Type='DWord'; Value=2 }
     # 설정 앱 '홈'(추천/계정 홍보) 페이지 숨김
     @{ Hive='SOFTWARE'; Path='Microsoft\Windows\CurrentVersion\Policies\Explorer'; Name='SettingsPageVisibility'; Type='String'; Value='hide:home' }
     # 로그인할 때마다 LiteWin 셸(클래식 작업표시줄/시작 메뉴/창 버튼) 적용

@@ -80,11 +80,13 @@ if (Test-Path $payloadJson) {
         try {
             if ($file -like '*.msi') {
                 $proc = Start-Process msiexec.exe -ArgumentList "/i `"$file`" $($pl.Args)" -Wait -PassThru
-            } else {
+            } elseif ($pl.Args) {
                 $proc = Start-Process $file -ArgumentList $pl.Args -Wait -PassThru
+            } else {
+                $proc = Start-Process $file -Wait -PassThru
             }
             Log "설치: $($pl.Name) 종료 코드 $($proc.ExitCode)"
-            Remove-Item $file -Force -ErrorAction SilentlyContinue
+            if (-not $pl.Keep) { Remove-Item $file -Force -ErrorAction SilentlyContinue }   # EP 는 재설치용으로 보관
         } catch { Log "설치 실패: $($pl.Name) — $_" }
     }
 }
@@ -140,6 +142,14 @@ if ($p.RemoveEdge) {
         Log 'Chrome 설치 실패 — 첫 로그인 후 winget 으로 다시 설치합니다'
     }
 }
+
+# ---------------------------------------------------------------- 구성요소 관리자 (Windows Update 와 함께 조용히 갱신)
+try {
+    . (Join-Path $root 'lib\LiteWin.Components.ps1')
+    Hide-LWComponentsFromApps
+    Register-LWComponentTask
+    Log '구성요소 관리 작업 등록 (부팅 / Windows Update 직후 / 매일)'
+} catch { Log "구성요소 관리 작업 등록 실패: $_" }
 
 # 설치 이미지에 남은 임시 파일 정리
 Remove-Item "$env:WINDIR\Setup\Scripts\*.log" -ErrorAction SilentlyContinue

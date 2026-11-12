@@ -39,11 +39,6 @@ function Set-TaskbarAutoHide([bool]$On) {
     Set-RegValue $script:StuckRectsKey 'Settings' $b Binary
 }
 
-function Restart-Explorer {
-    Get-Process explorer -ErrorAction SilentlyContinue | Stop-Process -Force
-    Start-Sleep -Seconds 2
-    if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { Start-Process explorer.exe }
-}
 
 # ------------------------------------------------------------------ 앱 시작 프로그램 켜고 끄기
 function Set-AppStartupState {
@@ -151,8 +146,7 @@ function Set-LWMode {
     foreach ($k in $Shell.Keys) { $shellOpts | Add-Member -NotePropertyName $k -NotePropertyValue $Shell[$k] -Force }
     $prev | Add-Member -NotePropertyName Shell -NotePropertyValue $shellOpts -Force
     $prev | Add-Member -NotePropertyName Mode -NotePropertyValue $Mode -Force
-    Restart-Explorer
-    Start-LWShell -State $prev -Apply
+    Start-LWShell -State $prev -Apply -RestartExplorer
 
     $prev | Add-Member -NotePropertyName Mode -NotePropertyValue $Mode -Force
     $prev | Add-Member -NotePropertyName UiOptions -NotePropertyValue @($UiOptions) -Force

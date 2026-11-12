@@ -12,6 +12,7 @@ param([switch]$FirstRun)
 $root = Split-Path -Parent $PSScriptRoot
 . (Join-Path $root 'lib\LiteWin.Common.ps1')
 . (Join-Path $root 'lib\LiteWin.Apps.ps1')
+. (Join-Path $root 'lib\LiteWin.Components.ps1')
 
 # 관리자 권한으로 다시 실행
 if (-not (Test-LWAdmin)) {
@@ -112,8 +113,17 @@ $rbLite = Add-Radio $p1 '라이트 윈도우' ($curMode -eq 'Lite')
 [void](Add-Label $p1 '    일반 Windows 조작. 화면은 클래식 구조(아래 선택)' $small $gray)
 $rbMac  = Add-Radio $p1 '맥 입력' ($curMode -eq 'MacInput')
 [void](Add-Label $p1 '    왼쪽 Alt = ⌘, 왼쪽 Win = ⌥, Caps Lock = 한/영, 맥 F열, 마우스 가속, 트랙패드 제스처. 화면은 클래식 구조' $small $gray)
-$shBar   = Add-Check $p1 '클래식 작업표시줄 (Win7 이전 구조, RetroBar)' ([bool](Get-ShellOpt 'ClassicTaskbar' $true)) 24
-$shStart = Add-Check $p1 'Win7 시작 메뉴 (Open-Shell)' ([bool](Get-ShellOpt 'ClassicStart' $true)) 24
+function New-Combo($panel, [string[]]$items, [int]$index, [int]$indent = 44) {
+    $c = New-Object Windows.Forms.ComboBox
+    $c.DropDownStyle = 'DropDownList'; $c.Width = 300
+    $c.Margin = New-Object Windows.Forms.Padding($indent, 0, 3, 4)
+    [void]$c.Items.AddRange($items); $c.SelectedIndex = $index
+    $panel.Controls.Add($c); return $c
+}
+$shBar   = Add-Check $p1 '클래식 작업표시줄' ([bool](Get-ShellOpt 'ClassicTaskbar' $true)) 24
+$cbEngine = New-Combo $p1 @('Windows 10 스타일 (ExplorerPatcher)', 'Windows 95~7 스타일 (RetroBar)') $(if ((Get-ShellOpt 'ClassicEngine' 'ep') -eq 'retrobar') { 1 } else { 0 })
+$shStart = Add-Check $p1 '클래식 시작 메뉴' ([bool](Get-ShellOpt 'ClassicStart' $true)) 24
+$cbStart = New-Combo $p1 @('Windows 7 스타일 (Open-Shell)', 'Windows 10 스타일 (ExplorerPatcher)') $(if ((Get-ShellOpt 'StartEngine' 'openshell') -eq 'ep') { 1 } else { 0 })
 $shLabels = Add-Check $p1 '작업표시줄 단추 펼쳐 보기 (프로그램 이름 표시, 묶지 않기)' ([bool](Get-ShellOpt 'TaskbarLabels' $false)) 24
 $rbUi   = Add-Radio $p1 '맥 입력 + UI 스타일' ($curMode -eq 'MacUI')
 [void](Add-Label $p1 '    맥 입력 + Dock(가운데 작업표시줄) + 아래에서 고른 화면 스타일' $small $gray)
@@ -136,7 +146,7 @@ $p1.Controls.Add($cbCaption)
 function Update-UiEnabled {
     foreach ($cb in $uiChecks.Values) { $cb.Enabled = $rbUi.Checked }
     $cbCaption.Enabled = $rbUi.Checked
-    $shBar.Enabled = -not $rbUi.Checked; $shStart.Enabled = -not $rbUi.Checked; $shLabels.Enabled = -not $rbUi.Checked
+    foreach ($c in $shBar, $shStart, $shLabels, $cbEngine, $cbStart) { $c.Enabled = -not $rbUi.Checked }
 }
 $rbUi.add_CheckedChanged({ Update-UiEnabled }); Update-UiEnabled
 
@@ -192,6 +202,41 @@ $cbEdge  = Add-Check $p4 'Edge 브라우저 제거 (WebView2 런타임은 유지
 $cbRedir = Add-Check $p4 'Edge 전용 링크(microsoft-edge:)를 Chrome 으로 열기' $redirect
 $cbEdge.add_CheckedChanged({ $cbRedir.Enabled = $cbEdge.Checked }); $cbRedir.Enabled = $cbEdge.Checked
 
+# ============================================================== 탭 5: 정보 (구성요소)
+$p5 = New-Page '정보'
+$cst = Get-LWComponentState
+[void](Add-Label $p5 '셸 구성요소는 Windows Update 와 함께 자동으로 관리됩니다. 따로 신경 쓰지 않아도 됩니다.' $bold)
+$epi = Get-EPInstalled
+$verLines = @(
+    ('ExplorerPatcher : ' + $(if ($epi) { $epi.RawVersion } elseif ($cst.EpSuspended) { '기능 업데이트 보호 중 (업그레이드 후 자동 재설치)' } else { '없음 (RetroBar 사용)' }))
+)
+foreach ($n in 'RetroBar*', 'Open-Shell*', 'AutoHotkey*', 'MPC-BE*', 'ImageGlass*') {
+    $e = @(Get-UninstallEntries $n) | Select-Object -First 1
+    $verLines += ('{0,-16}: {1}' -f $n.TrimEnd('*'), $(if ($e) { $e.DisplayVersion } else { '없음' }))
+}
+$lblVer = Add-Label $p5 ($verLines -join "`n") (New-Object Drawing.Font('Consolas', 9)) $null 6
+$cbAuto = Add-Check $p5 '자동 업데이트 (Windows Update 직후, 사용 중이면 다음 부팅 때)' ([bool]$cst.AutoUpdate)
+$delayPanel = New-Object Windows.Forms.FlowLayoutPanel
+$delayPanel.AutoSize = $true; $delayPanel.Margin = New-Object Windows.Forms.Padding(20, 0, 3, 4)
+$lblDelay = New-Object Windows.Forms.Label; $lblDelay.Text = '새 버전은 배포 후'; $lblDelay.AutoSize = $true; $lblDelay.Margin = New-Object Windows.Forms.Padding(0, 6, 3, 0)
+$numDelay = New-Object Windows.Forms.NumericUpDown; $numDelay.Minimum = 0; $numDelay.Maximum = 60; $numDelay.Value = [int]$cst.DelayDays; $numDelay.Width = 50
+$lblDelay2 = New-Object Windows.Forms.Label; $lblDelay2.Text = '일이 지나야 설치 (문제 있는 버전 회피)'; $lblDelay2.AutoSize = $true; $lblDelay2.Margin = New-Object Windows.Forms.Padding(3, 6, 3, 0)
+$delayPanel.Controls.AddRange(@($lblDelay, $numDelay, $lblDelay2)); $p5.Controls.Add($delayPanel)
+$btnCheck = New-Object Windows.Forms.Button; $btnCheck.Text = '지금 업데이트 확인'; $btnCheck.AutoSize = $true
+$btnCheck.add_Click({
+    Start-ScheduledTask -TaskPath '\LiteWin\' -TaskName 'LiteWin Components' -ErrorAction SilentlyContinue
+    [Windows.Forms.MessageBox]::Show('백그라운드에서 확인합니다. 결과는 아래 기록과 logs\Components.log 에 남습니다.', 'LiteWin') | Out-Null
+})
+$p5.Controls.Add($btnCheck)
+[void](Add-Label $p5 '최근 기록' $bold $null 10)
+$hist = @($cst.History) | Select-Object -Last 8
+[void](Add-Label $p5 $(if ($hist) { $hist -join "`n" } else { '(아직 없음)' }) $small $gray)
+function Save-ComponentOptions {
+    $s2 = Get-LWComponentState
+    $s2.AutoUpdate = $cbAuto.Checked; $s2.DelayDays = [int]$numDelay.Value
+    Save-LWComponentState $s2
+}
+
 # ============================================================== 하단 버튼
 $btnApply = New-Object Windows.Forms.Button
 $btnApply.Text = '적용'; $btnApply.Size = New-Object Drawing.Size(110, 32)
@@ -206,6 +251,7 @@ $form.Controls.AddRange(@($btnApply, $btnSkip, $btnClose))
 $form.AcceptButton = $btnApply
 
 function Start-Apply([bool]$installApps) {
+    try { Save-ComponentOptions } catch { }
     $mode = if ($rbUi.Checked) { 'MacUI' } elseif ($rbMac.Checked) { 'MacInput' } else { 'Lite' }
     $ui = @(); foreach ($k in $uiChecks.Keys) { if ($uiChecks[$k].Checked -and $mode -eq 'MacUI') { $ui += $k } }
     $apps = @()
@@ -221,6 +267,7 @@ function Start-Apply([bool]$installApps) {
         Keys = @{ CapsLockToHangul = $kbCaps.Checked; OptionWordMove = $kbWord.Checked; CmdQuitApp = $kbQuit.Checked
                   MacFKeys = $kbF.Checked; StandardFKeys = $kbStdF.Checked; GameAutoOff = $kbGame.Checked }
         Shell = @{ ClassicTaskbar = $shBar.Checked; ClassicStart = $shStart.Checked; TaskbarLabels = $shLabels.Checked
+                   ClassicEngine = @('ep', 'retrobar')[$cbEngine.SelectedIndex]; StartEngine = @('openshell', 'ep')[$cbStart.SelectedIndex]
                    Caption = @('off', 'traffic', 'fullscreen')[$cbCaption.SelectedIndex] }
         RemoveEdge = $cbEdge.Checked; EdgeRedirect = $cbRedir.Checked
     }

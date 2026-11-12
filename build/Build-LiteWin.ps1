@@ -67,6 +67,7 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'OfflineEdge.ps1')
 . (Join-Path $RepoRoot 'lib\LiteWin.Common.ps1')
 . (Join-Path $RepoRoot 'lib\LiteWin.Assoc.ps1')
+. (Join-Path $RepoRoot 'lib\LiteWin.Components.ps1')
 $ChromeMsiUrl = 'https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise64.msi'
 
 # 설치 이미지에 미리 넣을 프로그램 (winget download = 매니페스트의 SHA-256 으로 검증된 공식 설치 파일)
@@ -367,6 +368,17 @@ try {
     # 미리 넣는 프로그램 (MPC-BE, ImageGlass, RetroBar, Open-Shell, AutoHotkey)
     Step '내장 프로그램 설치 파일 받기 (winget, 해시 검증)'
     $payloadList = @(Save-WingetPayloads -Dest (Join-Path $lw 'payload'))
+    # ExplorerPatcher (Win10 클래식 작업표시줄) — GitHub 공식 릴리스, 배포 후 7일 지난 버전, SHA-256 확인
+    try {
+        $epRel = Get-GitHubRelease -Repo $script:EPRepo -Asset $script:EPAsset -DelayDays 7
+        if ($epRel) {
+            $epFile = Join-Path $lw 'payload\ep_setup.exe'
+            $h = Save-VerifiedAsset -Release $epRel -OutFile $epFile -AllowUnverified
+            if (-not $epRel.Sha256) { Warn "ExplorerPatcher $($epRel.Tag): 배포처 해시 없음 — SHA-256 $h 를 릴리스 페이지와 직접 비교하세요" }
+            $payloadList += [ordered]@{ Name = 'explorerpatcher'; Id = $script:EPRepo; File = 'ep_setup.exe'; Type = 'exe'; Args = ''; Keep = $true }
+            Info ("explorerpatcher: {0} ({1:N1}MB)" -f $epRel.Tag, ((Get-Item $epFile).Length / 1MB))
+        } else { Warn 'ExplorerPatcher 릴리스를 찾지 못함 — 클래식 작업표시줄은 RetroBar 사용' }
+    } catch { Warn "ExplorerPatcher 받기 실패 — 클래식 작업표시줄은 RetroBar 사용: $($_.Exception.Message)" }
     ConvertTo-Json -InputObject $payloadList -Depth 3 | Out-File (Join-Path $lw 'payload\payloads.json') -Encoding utf8
 
     # 시작 메뉴 > 클래식 제어판 (설정 앱으로 옮겨간 항목 중 클래식 창이 남아 있는 것)
