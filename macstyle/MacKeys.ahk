@@ -87,7 +87,7 @@ GroupAdd "Terminal", "ahk_exe mintty.exe"
 ; ⌘A 전체선택, ⌘S 저장, ⌘F 찾기, ⌘T 새 탭, ⌘N 새 창, ⌘P 인쇄, ⌘1~9 탭 이동 ...
 ; (Hotkey() 함수는 #HotIf 가 아니라 HotIf() 조건을 따르므로 여기서 따로 지정)
 HotIf (*) => Active()
-for key in StrSplit("a b d e f g i j k l n o p r s t u y = - / . ;", " ") {
+for key in StrSplit("a b d e f g i j k l n o p r s t u y = - / . `;", " ")   ; `; = 세미콜론(이스케이프) {
     Hotkey "<!" key,  SendCtrl.Bind(key)
     Hotkey "<!+" key, SendCtrl.Bind("+" key)       ; ⌘⇧T(닫은 탭 다시 열기) 등
 }
