@@ -66,6 +66,25 @@ $script:OfflineRegTweaks = @(
     @{ Hive='NTUSER'; Path='Software\Microsoft\Windows\CurrentVersion\Search'; Name='BingSearchEnabled'; Type='DWord'; Value=0 }
 )
 
+# 클래식 구조 / 제어판 우선 / LiteWin 셸 실행
+$script:OfflineRegTweaks += @(
+    # Win10 이전처럼 전체 오른쪽 클릭 메뉴 (Windows 11 '추가 옵션 표시' 단계 없앰)
+    @{ Hive='NTUSER'; Path='Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32'; Name='(default)'; Type='String'; Value='' }
+    # 제어판: 큰 아이콘으로 모든 항목 바로 보기
+    @{ Hive='NTUSER'; Path='Software\Microsoft\Windows\CurrentVersion\Explorer\ControlPanel'; Name='AllItemsIconView'; Type='DWord'; Value=0 }
+    @{ Hive='NTUSER'; Path='Software\Microsoft\Windows\CurrentVersion\Explorer\ControlPanel'; Name='StartupPage'; Type='DWord'; Value=1 }
+    # 작업표시줄 기본: 왼쪽 정렬, 단추 결합 안 함(이름 표시) — RetroBar 를 끈 경우에도 클래식에 가깝게
+    @{ Hive='NTUSER'; Path='Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name='TaskbarAl'; Type='DWord'; Value=0 }
+    @{ Hive='NTUSER'; Path='Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name='TaskbarGlomLevel'; Type='DWord'; Value=2 }
+    @{ Hive='NTUSER'; Path='Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name='MMTaskbarGlomLevel'; Type='DWord'; Value=2 }
+    @{ Hive='NTUSER'; Path='Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name='Start_TrackDocs'; Type='DWord'; Value=1 }
+    # 설정 앱 '홈'(추천/계정 홍보) 페이지 숨김
+    @{ Hive='SOFTWARE'; Path='Microsoft\Windows\CurrentVersion\Policies\Explorer'; Name='SettingsPageVisibility'; Type='String'; Value='hide:home' }
+    # 로그인할 때마다 LiteWin 셸(클래식 작업표시줄/시작 메뉴/창 버튼) 적용
+    @{ Hive='SOFTWARE'; Path='Microsoft\Windows\CurrentVersion\Run'; Name='LiteWinShell'; Type='String'
+       Value='powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "C:\ProgramData\LiteWin\app\Start-LiteWinShell.ps1"' }
+)
+
 # 존재하면 삭제할 키 (24H2: 설치 직후 Outlook/DevHome 을 몰래 다시 까는 예약)
 $script:OfflineRegDeleteKeys = @(
     @{ Hive='SOFTWARE'; Path='Microsoft\WindowsUpdate\Orchestrator\UScheduler_Oobe\OutlookUpdate' }

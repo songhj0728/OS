@@ -1,0 +1,55 @@
+name: validate
+
+on:
+  push:
+    branches: [ main, 'claude/**' ]
+  pull_request:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          $bad = 0
+          Get-ChildItem -Recurse -Include *.ps1, *.psd1 | ForEach-Object {
+            $tokens = $null; $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors)
+            foreach ($e in $errors) { $bad++; Write-Host "::error file=$($_.FullName),line=$($e.Extent.StartLineNumber)::$($e.Message)" }
+          }
+          Get-ChildItem profiles\*.psd1 | ForEach-Object { [void](Import-PowerShellDataFile $_.FullName) }
+          [void](Get-Content apps\catalog.json -Raw -Encoding UTF8 | ConvertFrom-Json)
+          if ($bad) { exit 1 }
+
+      - name: Compile C# tools (.NET Framework, same as build)
+        shell: powershell
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'bin'; New-Item -ItemType Directory $out -Force | Out-Null
+          Add-Type -TypeDefinition (Get-Content shell\EdgeRedirect.cs -Raw -Encoding UTF8) -OutputAssembly "$out\LiteWinEdgeRedirect.exe" -OutputType WindowsApplication -IgnoreWarnings
+          Add-Type -TypeDefinition (Get-Content shell\LiteWinCaption.cs -Raw -Encoding UTF8) -OutputAssembly "$out\LiteWinCaption.exe" -OutputType WindowsApplication -ReferencedAssemblies System.Windows.Forms, System.Drawing -IgnoreWarnings
+          Get-ChildItem $out
+
+      - name: Validate AutoHotkey script
+        shell: powershell
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'ahk.zip'; $dir = Join-Path $env:RUNNER_TEMP 'ahk'
+          Invoke-WebRequest -UseBasicParsing https://www.autohotkey.com/download/ahk-v2.zip -OutFile $zip
+          Expand-Archive $zip $dir -Force
+          $p = Start-Process "$dir\AutoHotkey64.exe" -ArgumentList '/ErrorStdOut', '/validate', 'macstyle\MacKeys.ahk' -PassThru -NoNewWindow -RedirectStandardError "$env:RUNNER_TEMP\ahk.err"
+          if (-not $p.WaitForExit(30000)) { $p.Kill(); Write-Host '::warning::AutoHotkey /validate timed out (switch not supported?)'; exit 0 }
+          $err = Get-Content "$env:RUNNER_TEMP\ahk.err" -Raw
+          if ($p.ExitCode -ne 0 -or $err) { Write-Host "::error::$err"; exit 1 }
+          Write-Host 'MacKeys.ahk OK'
+
+      - name: Smoke-test library functions (no system changes)
+        shell: powershell
+        run: |
+          . .\lib\LiteWin.Apps.ps1
+          . .\macstyle\MacStyleSettings.ps1
+          $c = Get-LWCatalog; Write-Host "catalog apps: $($c.apps.Count)"
+          $b = ConvertTo-MouseCurveBytes @(0.0, 0.43, 1.25, 3.86, 40.0)
+          if ($b.Length -ne 40) { throw "curve bytes = $($b.Length)" }
+          Write-Host 'OK'

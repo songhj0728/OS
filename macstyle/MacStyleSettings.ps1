@@ -153,6 +153,9 @@ function Set-MacKeysConfig {
         [bool]$CapsLockToHangul = $true,
         [bool]$OptionWordMove   = $true,
         [bool]$CmdQuitApp       = $true,
+        [bool]$MacFKeys         = $true,    # F1~F12 = 맥 기본 기능
+        [bool]$StandardFKeys    = $false,   # 맥 "표준 기능 키로 사용" (⌥+F 와 역할 교환)
+        [bool]$GameAutoOff      = $false,   # 전체화면 게임에서 자동 끔 (기본: 맥처럼 항상 동일)
         [ValidateSet('windows', 'flow')][string]$Spotlight = 'windows'
     )
     New-Item -ItemType Directory -Path $script:LWUserDir -Force | Out-Null
@@ -161,6 +164,9 @@ function Set-MacKeysConfig {
 CapsLockToHangul=$([int]$CapsLockToHangul)
 OptionWordMove=$([int]$OptionWordMove)
 CmdQuitApp=$([int]$CmdQuitApp)
+MacFKeys=$([int]$MacFKeys)
+StandardFKeys=$([int]$StandardFKeys)
+GameAutoOff=$([int]$GameAutoOff)
 Spotlight=$Spotlight
 "@
     # AHK IniRead 는 UTF-16LE 를 가장 안정적으로 읽는다

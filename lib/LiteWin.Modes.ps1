@@ -7,6 +7,7 @@
 #>
 . (Join-Path $PSScriptRoot 'LiteWin.Common.ps1')
 . (Join-Path $PSScriptRoot 'LiteWin.Apps.ps1')
+. (Join-Path $PSScriptRoot 'LiteWin.Shell.ps1')
 . (Join-Path (Split-Path -Parent $PSScriptRoot) 'macstyle\MacStyleSettings.ps1')
 
 # UI 옵션 (Windows 내장 — 추가 메모리 0)
@@ -103,13 +104,15 @@ function Set-LWMode {
     <#
     .PARAMETER Mode       Lite | MacInput | MacUI
     .PARAMETER UiOptions  MacUI 일 때 켤 항목: DarkMode, AutoHideTaskbar, Transparency, quicklook, flow, windhawk
-    .PARAMETER Keys       MacKeys 옵션 해시테이블 (CapsLockToHangul, OptionWordMove, CmdQuitApp)
+    .PARAMETER Keys       MacKeys 옵션 (CapsLockToHangul, OptionWordMove, CmdQuitApp, MacFKeys, StandardFKeys, GameAutoOff)
+    .PARAMETER Shell      셸 옵션 (ClassicTaskbar, ClassicStart: 라이트/맥 입력용 / Caption: off|traffic|fullscreen: 맥 UI용)
     #>
     param(
         [Parameter(Mandatory)][ValidateSet('Lite', 'MacInput', 'MacUI')][string]$Mode,
         [string[]]$UiOptions = @(),
         [bool]$NaturalMouseWheel = $true,
-        [hashtable]$Keys = @{}
+        [hashtable]$Keys = @{},
+        [hashtable]$Shell = @{}
     )
     $prev = Get-LWState
     Write-LWLog "모드 전환: $($prev.Mode) → $Mode"
@@ -125,13 +128,12 @@ function Set-LWMode {
         [void](Set-NaturalMouseWheel -Enable $NaturalMouseWheel)
         $spot = if (($Mode -eq 'MacUI') -and ($UiOptions -contains 'flow')) { 'flow' } else { 'windows' }
         $cfg = @{ Spotlight = $spot }
-        foreach ($k in 'CapsLockToHangul', 'OptionWordMove', 'CmdQuitApp') { if ($Keys.ContainsKey($k)) { $cfg[$k] = [bool]$Keys[$k] } }
+        foreach ($k in 'CapsLockToHangul', 'OptionWordMove', 'CmdQuitApp', 'MacFKeys', 'StandardFKeys', 'GameAutoOff') { if ($Keys.ContainsKey($k)) { $cfg[$k] = [bool]$Keys[$k] } }
         Set-MacKeysConfig @cfg
         Enable-MacKeys
     }
 
     # ---- UI ----
-    $needExplorer = $false
     if ($Mode -eq 'MacUI') {
         Save-RegSnapshot -Name 'ui' -Entries (Get-UiSnapshotEntries)
         $dark = [int](-not ($UiOptions -contains 'DarkMode'))
@@ -140,18 +142,22 @@ function Set-LWMode {
         Set-RegValue $script:PersonalizeKey 'EnableTransparency' ([int]($UiOptions -contains 'Transparency'))
         Set-TaskbarAutoHide ($UiOptions -contains 'AutoHideTaskbar')
         Set-UiApps -EnabledIds $UiOptions
-        $needExplorer = $true
     } elseif ($prev.Mode -eq 'MacUI') {
         [void](Restore-RegSnapshot -Name 'ui')
         Set-UiApps -EnabledIds @()
-        $needExplorer = $true
     }
-    if ($needExplorer) { Restart-Explorer }
+    # 셸 옵션 저장 → 탐색기 재시작 → 셸 구성요소 적용 (로그인 때도 같은 값으로 다시 적용됨)
+    $shellOpts = Get-LWShellOptions -State $prev
+    foreach ($k in $Shell.Keys) { $shellOpts | Add-Member -NotePropertyName $k -NotePropertyValue $Shell[$k] -Force }
+    $prev | Add-Member -NotePropertyName Shell -NotePropertyValue $shellOpts -Force
+    $prev | Add-Member -NotePropertyName Mode -NotePropertyValue $Mode -Force
+    Restart-Explorer
+    Start-LWShell -State $prev -Apply
 
     $prev | Add-Member -NotePropertyName Mode -NotePropertyValue $Mode -Force
     $prev | Add-Member -NotePropertyName UiOptions -NotePropertyValue @($UiOptions) -Force
     $prev | Add-Member -NotePropertyName NaturalMouseWheel -NotePropertyValue $NaturalMouseWheel -Force
     $prev | Add-Member -NotePropertyName Keys -NotePropertyValue $Keys -Force
     Set-LWState $prev
-    Write-LWLog '모드 전환 완료 (마우스/트랙패드는 로그아웃 후 반영)'
+    Write-LWLog '모드 전환 완료 (마우스/트랙패드·작업표시줄 일부는 재부팅/로그아웃 후 완전히 반영)'
 }

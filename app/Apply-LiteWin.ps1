@@ -19,6 +19,8 @@ if (-not (Test-LWAdmin)) { Write-LWLog '관리자 권한이 필요합니다.' ER
 $c = Get-Content $ChoicesFile -Raw -Encoding UTF8 | ConvertFrom-Json
 $keys = @{}
 if ($c.Keys) { foreach ($p in $c.Keys.PSObject.Properties) { $keys[$p.Name] = [bool]$p.Value } }
+$shell = @{}
+if ($c.Shell) { foreach ($p in $c.Shell.PSObject.Properties) { $shell[$p.Name] = $p.Value } }
 $apps = @($c.Apps | Where-Object { $_ })
 $failed = @()
 
@@ -42,7 +44,7 @@ $failed += Install-LWApps -Ids $apps
 
 # ---- 4. 모드 ----
 try {
-    Set-LWMode -Mode $c.Mode -UiOptions @($c.UiOptions) -NaturalMouseWheel ([bool]$c.NaturalMouseWheel) -Keys $keys
+    Set-LWMode -Mode $c.Mode -UiOptions @($c.UiOptions) -NaturalMouseWheel ([bool]$c.NaturalMouseWheel) -Keys $keys -Shell $shell
 } catch {
     Write-LWLog "모드 전환 실패: $_" ERROR
     $failed += "모드 전환 ($($c.Mode))"
@@ -82,6 +84,6 @@ if ($failed.Count) {
 } else {
     Write-LWLog '모두 완료되었습니다.'
 }
-if ($c.Mode -ne 'Lite') { Write-Host '마우스/트랙패드 설정은 로그아웃 후 다시 로그인하면 반영됩니다.' -ForegroundColor Cyan }
+Write-Host '마우스/트랙패드 등 일부 설정은 재부팅(또는 로그아웃) 후 완전히 반영됩니다.' -ForegroundColor Cyan
 Remove-Item $ChoicesFile -Force -ErrorAction SilentlyContinue
 Read-Host "`n닫으려면 Enter"

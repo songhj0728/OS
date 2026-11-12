@@ -85,9 +85,14 @@ function Add-Radio($panel, [string]$text, [bool]$checked) {
     $rb.Margin = New-Object Windows.Forms.Padding(3, 8, 3, 0)
     $panel.Controls.Add($rb); return $rb
 }
-function Get-KeyOpt($name) {
+function Get-KeyOpt($name, [bool]$default = $true) {
     if ($keysState -and ($keysState.PSObject.Properties.Name -contains $name)) { return [bool]$keysState.$name }
-    return $true
+    return $default
+}
+$shellState = $state.Shell
+function Get-ShellOpt($name, $default) {
+    if ($shellState -and ($shellState.PSObject.Properties.Name -contains $name)) { return $shellState.$name }
+    return $default
 }
 
 $appChecks = @{}   # 카탈로그 id → CheckBox
@@ -104,11 +109,13 @@ function Add-CatalogSection($panel, [string]$categoryId, [int]$indent = 0) {
 $p1 = New-Page '모드'
 [void](Add-Label $p1 '조작 방식과 화면 스타일을 고르세요. 언제든 이 창에서 다시 바꿀 수 있습니다.')
 $rbLite = Add-Radio $p1 '라이트 윈도우' ($curMode -eq 'Lite')
-[void](Add-Label $p1 '    일반 Windows 조작 그대로. 상주 프로그램 없음' $small $gray)
+[void](Add-Label $p1 '    일반 Windows 조작. 화면은 클래식 구조(아래 선택)' $small $gray)
 $rbMac  = Add-Radio $p1 '맥 입력' ($curMode -eq 'MacInput')
-[void](Add-Label $p1 '    왼쪽 Alt = ⌘, 왼쪽 Win = ⌥, Caps Lock = 한/영, 맥 마우스 가속, 트랙패드 제스처 (약 3MB)' $small $gray)
+[void](Add-Label $p1 '    왼쪽 Alt = ⌘, 왼쪽 Win = ⌥, Caps Lock = 한/영, 맥 F열, 마우스 가속, 트랙패드 제스처. 화면은 클래식 구조' $small $gray)
+$shBar   = Add-Check $p1 '클래식 작업표시줄 (Win7 이전 구조, RetroBar)' ([bool](Get-ShellOpt 'ClassicTaskbar' $true)) 24
+$shStart = Add-Check $p1 'Win7 시작 메뉴 (Open-Shell)' ([bool](Get-ShellOpt 'ClassicStart' $true)) 24
 $rbUi   = Add-Radio $p1 '맥 입력 + UI 스타일' ($curMode -eq 'MacUI')
-[void](Add-Label $p1 '    위 기능 + 아래에서 고른 화면 스타일' $small $gray)
+[void](Add-Label $p1 '    맥 입력 + Dock(가운데 작업표시줄) + 아래에서 고른 화면 스타일' $small $gray)
 
 $uiChecks = [ordered]@{}
 $uiChecks['DarkMode']        = Add-Check $p1 '다크 모드' ($curUi -contains 'DarkMode') 24
@@ -118,20 +125,35 @@ foreach ($id in 'quicklook', 'flow', 'windhawk') {
     $app = $catalog.apps | Where-Object id -eq $id
     $uiChecks[$id] = Add-Check $p1 ($app.name + '  — 설치 필요') ($curUi -contains $id) 24
 }
-function Update-UiEnabled { foreach ($cb in $uiChecks.Values) { $cb.Enabled = $rbUi.Checked } }
+$capLabel = Add-Label $p1 '    창 버튼 (모든 창 왼쪽 위에 맥식 버튼 추가, 원래 버튼은 그대로)' $small $gray
+$cbCaption = New-Object Windows.Forms.ComboBox
+$cbCaption.DropDownStyle = 'DropDownList'; $cbCaption.Width = 330
+$cbCaption.Margin = New-Object Windows.Forms.Padding(27, 0, 3, 4)
+[void]$cbCaption.Items.AddRange(@('끔', '닫기 · 최소화 · 전체화면 (3개)', '전체화면 버튼만'))
+$cbCaption.SelectedIndex = switch (Get-ShellOpt 'Caption' 'traffic') { 'off' { 0 } 'fullscreen' { 2 } default { 1 } }
+$p1.Controls.Add($cbCaption)
+function Update-UiEnabled {
+    foreach ($cb in $uiChecks.Values) { $cb.Enabled = $rbUi.Checked }
+    $cbCaption.Enabled = $rbUi.Checked
+    $shBar.Enabled = -not $rbUi.Checked; $shStart.Enabled = -not $rbUi.Checked
+}
 $rbUi.add_CheckedChanged({ Update-UiEnabled }); Update-UiEnabled
 
 [void](Add-Label $p1 '맥 입력 세부 설정' $bold $null 12)
 $kbCaps  = Add-Check $p1 'Caps Lock 짧게 = 한/영 전환' (Get-KeyOpt 'CapsLockToHangul') 12
 $kbWord  = Add-Check $p1 '⌥←/→ 단어 이동 (창 스냅은 ⌃⌘방향키로 이동)' (Get-KeyOpt 'OptionWordMove') 12
 $kbQuit  = Add-Check $p1 '⌘Q = 앱 종료' (Get-KeyOpt 'CmdQuitApp') 12
+$kbF     = Add-Check $p1 'F열 맥 기본 (F1/F2 밝기, F3 작업 보기, F4 검색, F7~F9 미디어, F10~F12 볼륨)' (Get-KeyOpt 'MacFKeys') 12
+$kbStdF  = Add-Check $p1 'F1, F2 등을 표준 기능 키로 사용 (⌥+F키 = 맥 기능)' (Get-KeyOpt 'StandardFKeys' $false) 24
+$kbGame  = Add-Check $p1 '전체화면 게임에서는 맥 단축키 끄기 (기본: 어디서나 동일)' (Get-KeyOpt 'GameAutoOff' $false) 12
 $kbWheel = Add-Check $p1 '마우스 휠 자연스러운 스크롤 (맥 방향)' ($(if ($null -ne $state.NaturalMouseWheel) { [bool]$state.NaturalMouseWheel } else { $true })) 12
-function Update-KeysEnabled { foreach ($cb in $kbCaps, $kbWord, $kbQuit, $kbWheel) { $cb.Enabled = -not $rbLite.Checked } }
+function Update-KeysEnabled { foreach ($cb in $kbCaps, $kbWord, $kbQuit, $kbF, $kbStdF, $kbGame, $kbWheel) { $cb.Enabled = -not $rbLite.Checked } }
+$rbMac.add_CheckedChanged({ Update-UiEnabled }); $rbLite.add_CheckedChanged({ Update-UiEnabled })
 $rbLite.add_CheckedChanged({ Update-KeysEnabled }); Update-KeysEnabled
 
 # ============================================================== 탭 2: 사진·동영상
 $p2 = New-Page '사진·동영상'
-[void](Add-Label $p2 '기본은 Windows 사진 / 미디어 플레이어입니다. 더 많은 형식(EXIF, VP9, HEVC, RAW 등)이 필요할 때만 고르세요.')
+[void](Add-Label $p2 '동영상(HEVC 포함)은 MPC-BE, 아이폰 사진(.heic)은 ImageGlass 로 바로 열리도록 이미 설치되어 있습니다. 그 밖의 사진은 Windows 사진 앱. 탐색기 미리보기·사진 앱에서도 VP9/AV1/RAW 등을 보려면 아래 코덱 팩을 고르세요.')
 Add-CatalogSection $p2 'media'
 
 # ============================================================== 탭 3: 게임
@@ -191,7 +213,10 @@ function Start-Apply([bool]$installApps) {
     $choices = [ordered]@{
         Mode = $mode; UiOptions = $ui; Apps = $apps; FirstRun = [bool]$FirstRun
         NaturalMouseWheel = $kbWheel.Checked
-        Keys = @{ CapsLockToHangul = $kbCaps.Checked; OptionWordMove = $kbWord.Checked; CmdQuitApp = $kbQuit.Checked }
+        Keys = @{ CapsLockToHangul = $kbCaps.Checked; OptionWordMove = $kbWord.Checked; CmdQuitApp = $kbQuit.Checked
+                  MacFKeys = $kbF.Checked; StandardFKeys = $kbStdF.Checked; GameAutoOff = $kbGame.Checked }
+        Shell = @{ ClassicTaskbar = $shBar.Checked; ClassicStart = $shStart.Checked
+                   Caption = @('off', 'traffic', 'fullscreen')[$cbCaption.SelectedIndex] }
         RemoveEdge = $cbEdge.Checked; EdgeRedirect = $cbRedir.Checked
     }
     $file = Join-Path $env:TEMP ("litewin-choices-{0}.json" -f [guid]::NewGuid().ToString('N'))

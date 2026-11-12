@@ -9,6 +9,8 @@
 ;  즉  왼쪽 Alt = ⌘ Command,  왼쪽 Win = ⌥ Option.  오른쪽 Alt(한/영 키)는 건드리지 않는다.
 ;  맥 키보드(Magic Keyboard)를 연결한 경우에도 같은 위치라 그대로 쓰면 된다.
 ;
+;  전체화면(게임 포함)에서도 똑같이 동작한다. 일반 키(WASD, Ctrl, Space…)는 건드리지 않고 그대로 통과하고,
+;  ⌘ 조합과 F열만 바꾼다. 그래서 게임에서 Ctrl 은 언제나 진짜 Ctrl 이다 (맥과 같음).
 ;  잠시 끄기/켜기 :  Ctrl + Alt + Win + F12   (트레이 아이콘이 바뀜)
 ;  설정 바꾸기   :  시작 메뉴 > LiteWin 설정 (또는 %LOCALAPPDATA%\LiteWin\MacKeys.ini 수정 후 Reload)
 ; =============================================================================
@@ -31,7 +33,9 @@ global CapsLockToHangul := ReadOpt("CapsLockToHangul", "1") = "1"  ; Caps Lock �
 global OptionWordMove   := ReadOpt("OptionWordMove", "1") = "1"    ; ⌥←/→ 단어 이동, ⌥⌫ 단어 삭제 (창 스냅은 ⌃⌘방향키)
 global CmdQuitApp       := ReadOpt("CmdQuitApp", "1") = "1"        ; ⌘Q = 앱 종료(Alt+F4)
 global Spotlight        := ReadOpt("Spotlight", "windows")         ; windows = Windows 검색, flow = Flow Launcher(Alt+Space)
-global GameAutoOff      := ReadOpt("GameAutoOff", "1") = "1"       ; 전체화면(테두리 없는) 게임 중에는 자동으로 매핑 끔
+global GameAutoOff      := ReadOpt("GameAutoOff", "0") = "1"       ; 1 = 전체화면 게임 중 자동으로 매핑 끔 (기본: 끄지 않음 = 맥처럼 어디서나 동일)
+global MacFKeys         := ReadOpt("MacFKeys", "1") = "1"          ; F1~F12 를 맥 기본 기능(밝기/미션컨트롤/미디어/볼륨)으로
+global StandardFKeys    := ReadOpt("StandardFKeys", "0") = "1"     ; 맥 "F1, F2 등을 표준 기능 키로 사용" 옵션과 같음
 
 ; 전체화면 앱(대부분의 게임)인지: 제목표시줄이 없고 화면 전체를 덮는 창
 IsFullscreen() {
@@ -161,6 +165,92 @@ SendCtrl(keys, *) => Send("^" keys)
         SetCapsLockState !GetKeyState("CapsLock", "T")
         KeyWait "CapsLock"
     }
+}
+
+; ---- F열 (맥 기본) ----
+;  F1/F2 밝기  F3 Mission Control(작업 보기)  F4 Spotlight  F5 받아쓰기  F6 방해 금지(알림 끄기)
+;  F7/F8/F9 이전/재생·정지/다음  F10 음소거  F11/F12 볼륨
+;  ⌥(왼쪽 Win) + F키 = 맥의 Fn + F키 (표준 F1~F12). StandardFKeys=1 이면 반대.
+;  Ctrl/Alt/Shift 와 함께 누른 F키(예: Alt+F4, Ctrl+F5)는 그대로 통과한다.
+HotIf (*) => Active() && MacFKeys
+Loop 12 {
+    Hotkey "F" A_Index, FPress.Bind(A_Index, false)
+    Hotkey "<#F" A_Index, FPress.Bind(A_Index, true)
+}
+HotIf
+
+FPress(n, withOption, *) {
+    if (StandardFKeys != withOption)
+        Send "{F" n "}"
+    else
+        MacF(n)
+}
+
+MacF(n) {
+    switch n {
+        case 1:  Brightness(-10)
+        case 2:  Brightness(10)
+        case 3:  Send "#{Tab}"
+        case 4:  Send(Spotlight = "flow" ? "!{Space}" : "#s")
+        case 5:  Send "#h"
+        case 6:  ToggleNotifications()
+        case 7:  Send "{Media_Prev}"
+        case 8:  Send "{Media_Play_Pause}"
+        case 9:  Send "{Media_Next}"
+        case 10: Send "{Volume_Mute}"
+        case 11: Send "{Volume_Down}"
+        case 12: Send "{Volume_Up}"
+    }
+}
+
+ShowOsd(text) {
+    ToolTip text
+    SetTimer () => ToolTip(), -1000
+}
+
+; 밝기: 노트북 화면은 WMI, 외부 모니터는 DDC/CI (모니터 OSD 설정에서 DDC/CI 가 켜져 있어야 함)
+Brightness(delta) {
+    level := -1
+    try {
+        wmi := ComObjGet("winmgmts:\\.\root\WMI")
+        for m in wmi.ExecQuery("SELECT * FROM WmiMonitorBrightness WHERE Active=TRUE")
+            level := Max(0, Min(100, m.CurrentBrightness + delta))
+        if (level >= 0)
+            for meth in wmi.ExecQuery("SELECT * FROM WmiMonitorBrightnessMethods WHERE Active=TRUE")
+                meth.WmiSetBrightness(1, level)
+    }
+    try {
+        hMon := DllCall("MonitorFromWindow", "ptr", WinExist("A"), "uint", 2, "ptr")
+        n := 0
+        if DllCall("dxva2\GetNumberOfPhysicalMonitorsFromHMONITOR", "ptr", hMon, "uint*", &n) && n {
+            size := A_PtrSize + 256
+            buf := Buffer(n * size, 0)
+            if DllCall("dxva2\GetPhysicalMonitorsFromHMONITOR", "ptr", hMon, "uint", n, "ptr", buf) {
+                Loop n {
+                    h := NumGet(buf, (A_Index - 1) * size, "ptr")
+                    mn := 0, cur := 0, mx := 0
+                    if DllCall("dxva2\GetMonitorBrightness", "ptr", h, "uint*", &mn, "uint*", &cur, "uint*", &mx) {
+                        step := Round((mx - mn) * Abs(delta) / 100) || 1
+                        nv := Max(mn, Min(mx, cur + (delta > 0 ? step : -step)))
+                        DllCall("dxva2\SetMonitorBrightness", "ptr", h, "uint", nv)
+                        if (level < 0)
+                            level := Round((nv - mn) * 100 / Max(1, mx - mn))
+                    }
+                }
+                DllCall("dxva2\DestroyPhysicalMonitors", "uint", n, "ptr", buf)
+            }
+        }
+    }
+    ShowOsd(level >= 0 ? "밝기 " level "%" : "밝기 조절을 지원하지 않는 화면")
+}
+
+; 방해 금지(근사): Windows 알림 전체 켜기/끄기
+ToggleNotifications() {
+    key := "HKCU\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings"
+    cur := 1
+    try cur := RegRead(key, "NOC_GLOBAL_SETTING_TOASTS_ENABLED")
+    RegWrite(cur ? 0 : 1, "REG_DWORD", key, "NOC_GLOBAL_SETTING_TOASTS_ENABLED")
+    ShowOsd(cur ? "방해 금지 켬 (알림 끔)" : "방해 금지 끔 (알림 켬)")
 }
 
 #HotIf

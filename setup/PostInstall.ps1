@@ -69,6 +69,66 @@ if (Test-Path $chromeMsi) {
     } catch { Log "Chrome 설치 실패: $_" }
 }
 
+# ---------------------------------------------------------------- 내장 프로그램 (MPC-BE, ImageGlass, RetroBar, Open-Shell, AutoHotkey)
+$payloadDir = Join-Path $root 'payload'
+$payloadJson = Join-Path $payloadDir 'payloads.json'
+if (Test-Path $payloadJson) {
+    foreach ($pl in @(Get-Content $payloadJson -Raw -Encoding UTF8 | ConvertFrom-Json)) {
+        if (-not $pl -or -not $pl.File) { continue }
+        $file = Join-Path $payloadDir $pl.File
+        if (-not (Test-Path $file)) { continue }
+        try {
+            if ($file -like '*.msi') {
+                $proc = Start-Process msiexec.exe -ArgumentList "/i `"$file`" $($pl.Args)" -Wait -PassThru
+            } else {
+                $proc = Start-Process $file -ArgumentList $pl.Args -Wait -PassThru
+            }
+            Log "설치: $($pl.Name) 종료 코드 $($proc.ExitCode)"
+            Remove-Item $file -Force -ErrorAction SilentlyContinue
+        } catch { Log "설치 실패: $($pl.Name) — $_" }
+    }
+}
+
+# ---------------------------------------------------------------- 기본 앱: 웹=Chrome, 동영상=MPC-BE(HEVC 포함), .heic=ImageGlass
+#   설치된 프로그램이 등록한 ProgId 를 직접 찾아 기본 앱 연결 파일을 만들고, 첫 로그인 전에 가져온다(새 사용자에 적용).
+function Find-ProgId([string]$ext, [string]$pattern) {
+    # 1) RegisteredApplications → Capabilities\FileAssociations
+    $reg = Get-ItemProperty 'HKLM:\SOFTWARE\RegisteredApplications' -ErrorAction SilentlyContinue
+    if ($reg) {
+        foreach ($prop in $reg.PSObject.Properties) {
+            if ($prop.Name -like 'PS*' -or "$($prop.Name) $($prop.Value)" -notmatch $pattern) { continue }
+            $fa = Get-ItemProperty ("HKLM:\" + $prop.Value + '\FileAssociations') -ErrorAction SilentlyContinue
+            if ($fa -and $fa.$ext) { return $fa.$ext }
+        }
+    }
+    # 2) 확장자의 OpenWithProgids
+    $owp = Get-Item "HKLM:\SOFTWARE\Classes\$ext\OpenWithProgids" -ErrorAction SilentlyContinue
+    if ($owp) { foreach ($n in $owp.GetValueNames()) { if ($n -match $pattern) { return $n } } }
+    return $null
+}
+$assoc = [ordered]@{}
+if (Test-Path "$env:ProgramFiles\Google\Chrome\Application\chrome.exe") {
+    foreach ($e in 'http', 'https', '.htm', '.html', '.shtml', '.xht', '.xhtml', '.svg', '.pdf') { $assoc[$e] = @('ChromeHTML', 'Google Chrome') }
+}
+foreach ($e in '.mp4', '.m4v', '.mkv', '.mov', '.avi', '.wmv', '.webm', '.ts', '.m2ts', '.mts', '.hevc', '.h265', '.265', '.flv', '.3gp', '.mpg', '.mpeg') {
+    $id = Find-ProgId $e 'mpc'
+    if ($id) { $assoc[$e] = @($id, 'MPC-BE') }
+}
+foreach ($e in '.heic', '.heif', '.avif') {
+    $id = Find-ProgId $e 'ImageGlass'
+    if ($id) { $assoc[$e] = @($id, 'ImageGlass') }
+}
+if ($assoc.Count) {
+    $xmlPath = Join-Path $root 'DefaultAssociations.xml'
+    $lines = foreach ($k in $assoc.Keys) {
+        '  <Association Identifier="{0}" ProgId="{1}" ApplicationName="{2}" />' -f $k, [Security.SecurityElement]::Escape($assoc[$k][0]), $assoc[$k][1]
+    }
+    @('<?xml version="1.0" encoding="UTF-8"?>', '<DefaultAssociations>') + $lines + '</DefaultAssociations>' |
+        Set-Content $xmlPath -Encoding UTF8
+    & dism.exe /Online /English "/Import-DefaultAppAssociations:$xmlPath" | Out-Null
+    Log "기본 앱 연결 $($assoc.Count)개 적용 (dism 코드 $LASTEXITCODE)"
+}
+
 # ---------------------------------------------------------------- Edge 제거 (WebView2 유지) + 링크 리다이렉트
 if ($p.RemoveEdge) {
     if (-not $chromeOk -and -not (Test-Path "$env:ProgramFiles\Google\Chrome\Application\chrome.exe")) {

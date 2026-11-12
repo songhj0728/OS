@@ -67,6 +67,51 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $RepoRoot 'lib\LiteWin.Common.ps1')
 $ChromeMsiUrl = 'https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise64.msi'
 
+# 설치 이미지에 미리 넣을 프로그램 (winget download = 매니페스트의 SHA-256 으로 검증된 공식 설치 파일)
+#   설치 마지막 단계(SetupComplete)에서 인터넷 없이 무인 설치된다. Args 를 비우면 매니페스트의 설치 종류로 판단.
+$Payloads = @(
+    @{ Name = 'autohotkey'; Id = 'AutoHotkey.AutoHotkey';       Args = '' }                         # 맥 입력
+    @{ Name = 'mpc-be';     Id = 'MPC-BE.MPC-BE';               Args = '' }                         # 동영상 기본 (HEVC 등)
+    @{ Name = 'imageglass'; Id = 'DuongDieuPhap.ImageGlass';    Args = '' }                         # .heic/.heif 기본
+    @{ Name = 'retrobar';   Id = 'dremin.RetroBar';             Args = '' }                         # 클래식 작업표시줄
+    @{ Name = 'openshell';  Id = 'Open-Shell.Open-Shell-Menu';  Args = '/qn ADDLOCAL=StartMenu' }   # Win7 시작 메뉴
+)
+
+function Get-SilentArgs([string]$type, [string]$yamlSilent) {
+    switch -Regex ($type) {
+        '^(msi|wix)$' { return '/qn /norestart' }
+        '^inno$'      { return '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-' }
+        '^nullsoft$'  { return '/S' }
+        '^burn$'      { return '/quiet /norestart' }
+        default       { if ($yamlSilent) { return $yamlSilent } return $null }
+    }
+}
+
+function Save-WingetPayloads([string]$Dest) {
+    $winget = Get-WingetPath
+    if (-not $winget) { Warn 'winget 이 없어 설치 파일을 미리 넣지 못합니다 (첫 로그인 후 인터넷으로 설치됨)'; return @() }
+    $result = @()
+    foreach ($p in $Payloads) {
+        $dir = Join-Path $tmpDir "payload-$($p.Name)"
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        & $winget download --id $p.Id --exact --source winget --download-directory $dir `
+            --accept-package-agreements --accept-source-agreements --disable-interactivity | Out-Null
+        $installer = Get-ChildItem $dir -File | Where-Object { $_.Extension -in '.exe', '.msi' } | Select-Object -First 1
+        $yaml = Get-ChildItem $dir -File -Filter *.yaml | Select-Object -First 1
+        if (-not $installer) { Warn "$($p.Id): 다운로드 실패 — 건너뜀"; continue }
+        $yamlText = if ($yaml) { Get-Content $yaml.FullName -Raw } else { '' }
+        $type = if ($yamlText -match '(?m)^\s*InstallerType:\s*(\S+)') { $Matches[1].ToLower() } elseif ($installer.Extension -eq '.msi') { 'msi' } else { 'exe' }
+        $silent = if ($yamlText -match '(?m)^\s*Silent:\s*(.+)$') { $Matches[1].Trim().Trim("'").Trim('"') } else { '' }
+        $args2 = if ($p.Args) { $p.Args } else { Get-SilentArgs $type $silent }
+        if (-not $args2 -and $installer.Extension -ne '.msi') { Warn "$($p.Id): 무인 설치 방법을 알 수 없음($type) — 건너뜀"; continue }
+        $file = "$($p.Name)$($installer.Extension)"
+        Copy-Item $installer.FullName (Join-Path $Dest $file) -Force
+        $result += [ordered]@{ Name = $p.Name; Id = $p.Id; File = $file; Type = $type; Args = $args2 }
+        Info ("{0}: {1} ({2}, {3:N1}MB)" -f $p.Name, $installer.Name, $type, ($installer.Length / 1MB))
+    }
+    return $result
+}
+
 $sw = [Diagnostics.Stopwatch]::StartNew()
 function Step($msg)  { Write-Host ("`n[{0:mm\:ss}] == {1}" -f $sw.Elapsed, $msg) -ForegroundColor Cyan }
 function Info($msg)  { Write-Host "    $msg" }
@@ -306,12 +351,54 @@ try {
     @{ RemoveEdge = $cfg.RemoveEdge; EdgeRedirect = $cfg.RemoveEdge } | ConvertTo-Json |
         Out-File (Join-Path $lw 'machine.json') -Encoding utf8
 
-    # Edge 링크 → Chrome 리다이렉트 (작은 exe, 상주 안 함)
-    try {
-        Add-Type -TypeDefinition (Get-Content (Join-Path $RepoRoot 'lib\EdgeRedirect.cs') -Raw) `
-            -OutputAssembly (Join-Path $lw 'bin\LiteWinEdgeRedirect.exe') -OutputType WindowsApplication
-        Info 'LiteWinEdgeRedirect.exe 컴파일'
-    } catch { Warn "Edge 리다이렉트 컴파일 실패 — 이 기능 없이 진행: $($_.Exception.Message)" }
+    # LiteWin 자체 프로그램 컴파일 (.NET Framework 내장 컴파일러, 외부 도구 불필요)
+    #   LiteWinEdgeRedirect.exe : Edge 전용 링크 → Chrome (상주 안 함)
+    #   LiteWinCaption.exe      : 모든 창에 맥식 창 버튼 (맥 UI 모드에서만 실행)
+    foreach ($tool in @(
+        @{ Src = 'shell\EdgeRedirect.cs';   Out = 'LiteWinEdgeRedirect.exe'; Refs = @() }
+        @{ Src = 'shell\LiteWinCaption.cs'; Out = 'LiteWinCaption.exe';      Refs = @('System.Windows.Forms', 'System.Drawing') }
+    )) {
+        try {
+            $tArgs = @{
+                TypeDefinition = (Get-Content (Join-Path $RepoRoot $tool.Src) -Raw -Encoding UTF8)
+                OutputAssembly = (Join-Path $lw "bin\$($tool.Out)")
+                OutputType     = 'WindowsApplication'
+                IgnoreWarnings = $true
+            }
+            if ($tool.Refs.Count) { $tArgs.ReferencedAssemblies = $tool.Refs }
+            Add-Type @tArgs
+            Info "$($tool.Out) 컴파일"
+        } catch { Warn "$($tool.Out) 컴파일 실패 — 이 기능 없이 진행: $($_.Exception.Message)" }
+    }
+
+    # 미리 넣는 프로그램 (MPC-BE, ImageGlass, RetroBar, Open-Shell, AutoHotkey)
+    Step '내장 프로그램 설치 파일 받기 (winget, 해시 검증)'
+    $payloadList = @(Save-WingetPayloads -Dest (Join-Path $lw 'payload'))
+    ConvertTo-Json -InputObject $payloadList -Depth 3 | Out-File (Join-Path $lw 'payload\payloads.json') -Encoding utf8
+
+    # 시작 메뉴 > 클래식 제어판 (설정 앱으로 옮겨간 항목 중 클래식 창이 남아 있는 것)
+    $cpDir = Join-Path $mountDir 'ProgramData\Microsoft\Windows\Start Menu\Programs\클래식 제어판'
+    New-Item -ItemType Directory -Path $cpDir -Force | Out-Null
+    $wshCp = New-Object -ComObject WScript.Shell
+    foreach ($c in @(
+        @('제어판', 'control.exe', ''), @('프로그램 및 기능', 'control.exe', 'appwiz.cpl'),
+        @('네트워크 연결', 'control.exe', 'ncpa.cpl'), @('소리', 'control.exe', 'mmsys.cpl'),
+        @('마우스', 'control.exe', 'main.cpl'), @('전원 옵션', 'control.exe', 'powercfg.cpl'),
+        @('시스템 고급 설정', 'SystemPropertiesAdvanced.exe', ''), @('지역', 'control.exe', 'intl.cpl'),
+        @('날짜 및 시간', 'control.exe', 'timedate.cpl'), @('인터넷 옵션', 'control.exe', 'inetcpl.cpl'),
+        @('사용자 계정 (고급)', 'netplwiz.exe', ''), @('장치 관리자', 'mmc.exe', 'devmgmt.msc'),
+        @('디스크 관리', 'mmc.exe', 'diskmgmt.msc'), @('서비스', 'mmc.exe', 'services.msc'),
+        @('고급 방화벽', 'mmc.exe', 'wf.msc'), @('작업 스케줄러', 'mmc.exe', 'taskschd.msc'),
+        @('이벤트 뷰어', 'mmc.exe', 'eventvwr.msc'),
+        @('장치 및 프린터', 'explorer.exe', 'shell:::{A8A91A66-3A7D-4424-8D24-04E180695C7A}'),
+        @('모든 작업 (갓 모드)', 'explorer.exe', 'shell:::{ED7BA470-8E54-465E-825C-99712043E01C}')
+    )) {
+        $l = $wshCp.CreateShortcut((Join-Path $cpDir "$($c[0]).lnk"))
+        $l.TargetPath = "C:\Windows\System32\$($c[1])"
+        if ($c[1] -eq 'explorer.exe') { $l.TargetPath = 'C:\Windows\explorer.exe' }
+        $l.Arguments = $c[2]
+        $l.Save()
+    }
 
     if ($cfg.IncludeChrome) {
         Copy-Item $chromeMsi (Join-Path $lw 'payload\chrome.msi') -Force
