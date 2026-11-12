@@ -65,6 +65,7 @@ $ProgressPreference    = 'SilentlyContinue'   # DISM cmdlet 진행표시줄이 �
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'OfflineTweaks.ps1')
 . (Join-Path $PSScriptRoot 'OfflineEdge.ps1')
+. (Join-Path $PSScriptRoot 'OfflineRegAccess.ps1')
 . (Join-Path $RepoRoot 'lib\LiteWin.Common.ps1')
 . (Join-Path $RepoRoot 'lib\LiteWin.Assoc.ps1')
 . (Join-Path $RepoRoot 'lib\LiteWin.Components.ps1')
@@ -223,12 +224,28 @@ function Dismount-Hives {
 function HivePath($hive, $path) { "Registry::HKEY_LOCAL_MACHINE\LW_$hive\$path" }
 
 try {
-    Step '작업 폴더 준비'
-    if (Test-Path $mountDir) {
-        if (Get-WindowsImage -Mounted | Where-Object { $_.Path -eq $mountDir }) {
-            Warn '이전에 마운트된 이미지를 버리고 해제합니다'
-            Dismount-WindowsImage -Path $mountDir -Discard | Out-Null
+    Step '작업 폴더 준비 (지난 실패로 남은 마운트/레지스트리 정리)'
+    # 1) 지난 빌드가 남긴 오프라인 레지스트리 하이브
+    foreach ($h in 'SOFTWARE', 'SYSTEM', 'NTUSER') {
+        if (Test-Path "Registry::HKEY_LOCAL_MACHINE\LW_$h") {
+            [GC]::Collect(); & reg.exe unload "HKLM\LW_$h" 2>$null | Out-Null
+            if ($LASTEXITCODE -eq 0) { Warn "남아 있던 하이브 해제: LW_$h" } else { throw "남아 있던 하이브 LW_$h 를 해제할 수 없습니다. 재부팅 후 다시 실행하세요." }
         }
+    }
+    # 2) 작업 폴더 아래에 남은 마운트 (다른 프로그램이 쓰는 마운트는 건드리지 않음)
+    $stale = @(Get-WindowsImage -Mounted -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$WorkDir*" })
+    foreach ($m in $stale) {
+        Warn "이전에 마운트된 이미지를 버리고 해제합니다: $($m.Path) ($($m.MountStatus))"
+        try { Dismount-WindowsImage -Path $m.Path -Discard -ErrorAction Stop | Out-Null }
+        catch { & dism.exe /English /Unmount-Image "/MountDir:$($m.Path)" /Discard | Out-Null }
+    }
+    if ($stale.Count) { & dism.exe /English /Cleanup-Mountpoints | Out-Null }
+    if ((Test-Path $mountDir) -and (Get-ChildItem $mountDir -Force -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+        Warn '마운트 폴더에 남은 파일 정리'
+        & takeown.exe /F $mountDir /R /A /D Y 2>&1 | Out-Null
+        & icacls.exe $mountDir /grant '*S-1-5-32-544:F' /T /C /Q 2>&1 | Out-Null
+        Remove-Item $mountDir -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path $mountDir) { throw "마운트 폴더 $mountDir 를 비울 수 없습니다. 재부팅 후 다시 실행하세요." }
     }
     foreach ($d in $isoDir, $tmpDir) { if (Test-Path $d) { Remove-Item $d -Recurse -Force } }
     New-Item -ItemType Directory -Path $isoDir, $mountDir, $tmpDir -Force | Out-Null
@@ -320,19 +337,28 @@ try {
     try {
         $tweaks = @($script:OfflineRegTweaks)
         if ($BypassHardwareCheck) { $tweaks += $script:OfflineRegBypass }
+        # 보호된 키는 권한을 얻어 다시 시도하고, 그래도 안 되면 건너뛴다 (서비스 등은 설치 후 PostInstall 에서 다시 적용됨)
+        $skipped = @()
         foreach ($t in $tweaks) {
-            Set-RegValue -Path (HivePath $t.Hive $t.Path) -Name $t.Name -Value $t.Value -Type $t.Type
+            $path = HivePath $t.Hive $t.Path
+            $ok = Invoke-OfflineRegWrite -RegPath $path -Action { Set-RegValue -Path $path -Name $t.Name -Value $t.Value -Type $t.Type }
+            if (-not $ok) { $skipped += "$($t.Hive)\$($t.Path)\$($t.Name)" }
         }
-        Info "값 $($tweaks.Count)개 적용"
+        Info "값 $($tweaks.Count - $skipped.Count)/$($tweaks.Count)개 적용"
+        foreach ($x in $skipped) { Warn "권한 문제로 건너뜀: $x" }
         foreach ($k in $script:OfflineRegDeleteKeys) {
             $p = HivePath $k.Hive $k.Path
-            if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force; Info "- 키 삭제: $($k.Path)" }
+            if (-not (Test-Path -LiteralPath $p)) { continue }
+            if (Invoke-OfflineRegWrite -RegPath $p -Action { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction Stop }) { Info "- 키 삭제: $($k.Path)" }
+            else { Warn "권한 문제로 키 삭제 건너뜀: $($k.Path)" }
         }
         foreach ($v in $script:OfflineRegDeleteValues) {
             if ($v.Profile -and -not $cfg[$v.Profile]) { continue }
             $p = HivePath $v.Hive $v.Path
             if (Get-ItemProperty -LiteralPath $p -Name $v.Name -ErrorAction SilentlyContinue) {
-                Remove-ItemProperty -LiteralPath $p -Name $v.Name -Force; Info "- 값 삭제: $($v.Path)\$($v.Name)"
+                $n = $v.Name
+                if (Invoke-OfflineRegWrite -RegPath $p -Action { Remove-ItemProperty -LiteralPath $p -Name $n -Force -ErrorAction Stop }) { Info "- 값 삭제: $($v.Path)\$n" }
+                else { Warn "권한 문제로 값 삭제 건너뜀: $($v.Path)\$n" }
             }
         }
         if ($cfg.RemoveEdge) {
@@ -340,6 +366,7 @@ try {
             $er = Remove-EdgeFromImage -MountDir $mountDir -HivePath ${function:HivePath}
             foreach ($x in $er.Removed) { Info "- $x" }
             Info "'연결 프로그램' 목록에서 Edge 항목 $($er.OpenWithCleaned)개 제거"
+            foreach ($x in @($er.Skipped)) { Warn "권한 문제로 건너뜀: $x" }
         }
         # 맥 스타일 포인터 값은 여기서 넣지 않는다: 첫 로그인 마법사에서 고르고,
         # '라이트 윈도우' 로 되돌릴 때 원래 Windows 값을 복원할 수 있어야 하기 때문.
@@ -362,8 +389,18 @@ try {
 
     # LiteWin 자체 프로그램 컴파일 (.NET Framework 내장 컴파일러, 외부 도구 불필요)
     Step 'LiteWin 프로그램 컴파일 (설정 실행 파일, 창 버튼, Edge 링크 리다이렉트)'
-    $toolFail = & (Join-Path $PSScriptRoot 'Compile-LiteWinTools.ps1') -OutDir (Join-Path $lw 'bin')
-    if (@($toolFail).Count) { Warn ("컴파일 실패: " + ($toolFail -join ', ') + " — 해당 기능 없이 진행") }
+    #   별도 PowerShell 프로세스에서 이미지 밖(tmp\bin)에 컴파일한 뒤 복사한다.
+    #   같은 프로세스에서 컴파일하면 만든 exe 가 이 프로세스에 로드되어 잠기고, 그 파일이 마운트 폴더 안에 있으면
+    #   마지막 단계의 마운트 해제(Dismount -Save)가 실패한다.
+    $toolOut = Join-Path $tmpDir 'bin'
+    & "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass `
+        -File (Join-Path $PSScriptRoot 'Compile-LiteWinTools.ps1') -OutDir $toolOut | Out-Host
+    $toolFail = @()
+    foreach ($exe in 'LiteWinEdgeRedirect.exe', 'LiteWinCaption.exe', 'LiteWinSettings.exe') {
+        $src = Join-Path $toolOut $exe
+        if (Test-Path $src) { Copy-Item $src (Join-Path $lw "bin\$exe") -Force } else { $toolFail += $exe }
+    }
+    if ($toolFail.Count) { Warn ("컴파일 실패: " + ($toolFail -join ', ') + " — 해당 기능 없이 진행") }
 
     # 미리 넣는 프로그램 (MPC-BE, ImageGlass, RetroBar, Open-Shell, AutoHotkey)
     Step '내장 프로그램 설치 파일 받기 (winget, 해시 검증)'
@@ -441,7 +478,16 @@ try {
     }
 
     Step '이미지 저장 및 마운트 해제'
-    Dismount-WindowsImage -Path $mountDir -Save | Out-Null
+    # 이 프로세스가 이미지 안 파일을 붙잡고 있지 않도록 정리 후, 잠깐 기다리며 재시도
+    [GC]::Collect(); [GC]::WaitForPendingFinalizers()
+    for ($try = 1; ; $try++) {
+        try { Dismount-WindowsImage -Path $mountDir -Save -ErrorAction Stop | Out-Null; break }
+        catch {
+            if ($try -ge 3) { throw "마운트 해제 실패: $($_.Exception.Message) — 백신 실시간 검사나 탐색기 창이 $mountDir 안을 열고 있지 않은지 확인하세요." }
+            Warn "마운트 해제 재시도 ($try/3): $($_.Exception.Message)"
+            Start-Sleep -Seconds 10; [GC]::Collect()
+        }
+    }
     $mounted = $false
 
     Step '최대 압축으로 다시 내보내기'

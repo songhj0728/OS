@@ -86,3 +86,36 @@ jobs:
           $h = Save-VerifiedAsset -Release $r -OutFile $f -AllowUnverified
           Write-Host "downloaded hash $h"
           if ($r.Sha256 -and $h -ne $r.Sha256) { throw 'hash mismatch' }
+
+      - name: Offline registry access (protected key -> take ownership -> write)
+        shell: powershell
+        run: |
+          . .\lib\LiteWin.Common.ps1
+          . .\build\OfflineRegAccess.ps1
+          Enable-RegTakeOwnership
+          $sub = 'SOFTWARE\LiteWinCiProtected'
+          $hklm = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', 'Default')
+          $k = $hklm.CreateSubKey($sub)
+          # 소유자 SYSTEM, Administrators 는 읽기만 → 보통의 쓰기는 '액세스 거부'
+          $acl = New-Object System.Security.AccessControl.RegistrySecurity
+          $acl.SetAccessRuleProtection($true, $false)
+          $acl.SetOwner((New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')))
+          $acl.AddAccessRule((New-Object System.Security.AccessControl.RegistryAccessRule((New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')), 'FullControl', 'ContainerInherit', 'None', 'Allow')))
+          $acl.AddAccessRule((New-Object System.Security.AccessControl.RegistryAccessRule((New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')), 'ReadKey', 'ContainerInherit', 'None', 'Allow')))
+          $k.SetAccessControl($acl); $k.Close()
+          $path = "Registry::HKEY_LOCAL_MACHINE\$sub"
+          $denied = $false
+          try { New-ItemProperty -LiteralPath $path -Name Probe -Value 1 -PropertyType DWord -Force -ErrorAction Stop | Out-Null } catch { $denied = $true }
+          Write-Host "plain write denied: $denied"
+          $ok = Invoke-OfflineRegWrite -RegPath $path -Action { Set-RegValue -Path $path -Name 'Test' -Value 7 -Type DWord }
+          $v = (Get-ItemProperty -LiteralPath $path -Name Test -ErrorAction SilentlyContinue).Test
+          Write-Host "Invoke-OfflineRegWrite: $ok, value=$v"
+          Remove-Item -LiteralPath $path -Recurse -Force
+          if (-not $ok -or $v -ne 7) { exit 1 }
+
+      - name: Compile in a separate process leaves output unlocked
+        shell: powershell
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'bin2'
+          & "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File .\build\Compile-LiteWinTools.ps1 -OutDir $out | Out-Host
+          foreach ($f in Get-ChildItem $out -Filter *.exe) { Remove-Item $f.FullName -ErrorAction Stop; Write-Host "deleted (not locked): $($f.Name)" }

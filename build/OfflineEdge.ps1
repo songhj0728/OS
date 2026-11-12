@@ -47,12 +47,18 @@ function Remove-EdgeFromImage {
         "WOW6432Node\Microsoft\EdgeUpdate\Clients\$script:EdgeStableGuidOffline"
         "Microsoft\EdgeUpdate\Clients\$script:EdgeStableGuidOffline"
     )
+    # 보호된 키는 Invoke-OfflineRegWrite 가 권한을 얻어 다시 시도한다 (OfflineRegAccess.ps1)
+    $skipped = @()
     foreach ($k in $keys) {
         $p = & $HivePath 'SOFTWARE' $k
-        if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue; $removed += "HKLM\$k" }
+        if (-not (Test-Path -LiteralPath $p)) { continue }
+        if (Invoke-OfflineRegWrite -RegPath $p -Action { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction Stop }) { $removed += "HKLM\$k" }
+        else { $skipped += "HKLM\$k" }
     }
     $ra = & $HivePath 'SOFTWARE' 'RegisteredApplications'
-    Remove-ItemProperty -LiteralPath $ra -Name 'Microsoft Edge' -ErrorAction SilentlyContinue
+    if (Get-ItemProperty -LiteralPath $ra -Name 'Microsoft Edge' -ErrorAction SilentlyContinue) {
+        if (-not (Invoke-OfflineRegWrite -RegPath $ra -Action { Remove-ItemProperty -LiteralPath $ra -Name 'Microsoft Edge' -Force -ErrorAction Stop })) { $skipped += 'RegisteredApplications\Microsoft Edge' }
+    }
 
     # '연결 프로그램' 목록에서 Edge 제거 (모든 확장자의 OpenWithProgids)
     $classes = & $HivePath 'SOFTWARE' 'Classes'
@@ -62,24 +68,34 @@ function Remove-EdgeFromImage {
         $item = Get-Item -LiteralPath $owp -ErrorAction SilentlyContinue
         if (-not $item) { continue }
         foreach ($n in $item.GetValueNames()) {
-            if ($n -like 'MSEdge*') { Remove-ItemProperty -LiteralPath $owp -Name $n -ErrorAction SilentlyContinue; $cleaned++ }
+            if ($n -like 'MSEdge*') {
+                if (Invoke-OfflineRegWrite -RegPath $owp -Action { Remove-ItemProperty -LiteralPath $owp -Name $n -Force -ErrorAction Stop }) { $cleaned++ }
+            }
         }
     }
 
     # microsoft-edge: 링크 → LiteWin 리다이렉트 (기본 브라우저로)
     $proto = & $HivePath 'SOFTWARE' 'Classes\microsoft-edge'
-    Set-RegValue $proto '(default)' 'URL:microsoft-edge' String
-    Set-RegValue $proto 'URL Protocol' '' String
-    Set-RegValue "$proto\shell\open\command" '(default)' "`"$RedirectExe`" `"%1`"" String
-    Remove-ItemProperty -LiteralPath "$proto\shell\open\command" -Name 'DelegateExecute' -ErrorAction SilentlyContinue
+    $cmd = "$proto\shell\open\command"
+    $ok = Invoke-OfflineRegWrite -RegPath $cmd -Action {
+        Set-RegValue $proto '(default)' 'URL:microsoft-edge' String
+        Set-RegValue $proto 'URL Protocol' '' String
+        Set-RegValue $cmd '(default)' "`"$RedirectExe`" `"%1`"" String
+        Remove-ItemProperty -LiteralPath $cmd -Name 'DelegateExecute' -ErrorAction SilentlyContinue
+    }
+    if (-not $ok) { $skipped += 'Classes\microsoft-edge (설치 후 다시 등록됨)' }
 
-    # Edge 재설치 금지, WebView2 설치/업데이트는 허용
+    # Edge 재설치 금지, WebView2 설치/업데이트는 허용 (설치 후 PostInstall 에서도 다시 적용)
     $pol = & $HivePath 'SOFTWARE' 'Policies\Microsoft\EdgeUpdate'
-    Set-RegValue $pol "Install$script:EdgeStableGuidOffline" 0
-    Set-RegValue $pol 'CreateDesktopShortcutDefault' 0
-    Set-RegValue $pol "Install$script:WebView2GuidOffline" 1
-    Set-RegValue $pol "Update$script:WebView2GuidOffline" 1
-    Set-RegValue (& $HivePath 'SOFTWARE' 'Microsoft\EdgeUpdate') 'DoNotUpdateToEdgeWithChromium' 1
+    $eu  = & $HivePath 'SOFTWARE' 'Microsoft\EdgeUpdate'
+    $ok = Invoke-OfflineRegWrite -RegPath $pol -Action {
+        Set-RegValue $pol "Install$script:EdgeStableGuidOffline" 0
+        Set-RegValue $pol 'CreateDesktopShortcutDefault' 0
+        Set-RegValue $pol "Install$script:WebView2GuidOffline" 1
+        Set-RegValue $pol "Update$script:WebView2GuidOffline" 1
+    }
+    if (-not $ok) { $skipped += 'Policies\Microsoft\EdgeUpdate' }
+    if (-not (Invoke-OfflineRegWrite -RegPath $eu -Action { Set-RegValue $eu 'DoNotUpdateToEdgeWithChromium' 1 })) { $skipped += 'Microsoft\EdgeUpdate' }
 
-    [pscustomobject]@{ Removed = $removed; OpenWithCleaned = $cleaned }
+    [pscustomobject]@{ Removed = $removed; OpenWithCleaned = $cleaned; Skipped = $skipped }
 }
