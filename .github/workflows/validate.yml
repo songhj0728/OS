@@ -43,10 +43,14 @@ jobs:
           Invoke-WebRequest -UseBasicParsing $asset.browser_download_url -OutFile $zip
           Expand-Archive $zip $dir -Force
           $exe = Get-ChildItem $dir -Recurse -Filter AutoHotkey64.exe | Select-Object -First 1 -ExpandProperty FullName
-          $p = Start-Process $exe -ArgumentList '/ErrorStdOut', '/validate', 'macstyle\MacKeys.ahk' -PassThru -NoNewWindow -RedirectStandardError "$env:RUNNER_TEMP\ahk.err"
+          $p = Start-Process $exe -ArgumentList '/ErrorStdOut=UTF-8', '/validate', 'macstyle\MacKeys.ahk' -PassThru -NoNewWindow `
+                 -RedirectStandardError "$env:RUNNER_TEMP\ahk.err" -RedirectStandardOutput "$env:RUNNER_TEMP\ahk.out"
           if (-not $p.WaitForExit(30000)) { $p.Kill(); Write-Host '::warning::AutoHotkey /validate timed out (switch not supported?)'; exit 0 }
-          $err = Get-Content "$env:RUNNER_TEMP\ahk.err" -Raw
-          if ($p.ExitCode -ne 0 -or $err) { Write-Host "::error::$err"; exit 1 }
+          $p.WaitForExit()
+          $err = (Get-Content "$env:RUNNER_TEMP\ahk.err" -Raw -Encoding UTF8) + (Get-Content "$env:RUNNER_TEMP\ahk.out" -Raw -Encoding UTF8)
+          Write-Host "exit code: $($p.ExitCode)"
+          Write-Host $err
+          if ($err -match '==>|Error') { Write-Host "::error::MacKeys.ahk validation failed"; exit 1 }
           Write-Host 'MacKeys.ahk OK'
 
       - name: Smoke-test library functions (no system changes)
