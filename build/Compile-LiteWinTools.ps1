@@ -41,6 +41,7 @@ foreach ($t in $tools) {
         $cp.GenerateExecutable = $true
         $cp.OutputAssembly = Join-Path $OutDir $t.Out
         $cp.TreatWarningsAsErrors = $false
+        $cp.WarningLevel = 0          # (-IgnoreWarnings 는 -CompilerParameters 와 같이 쓸 수 없음)
         $cp.ReferencedAssemblies.Add('System.dll') | Out-Null
         foreach ($r in $t.Refs) { $cp.ReferencedAssemblies.Add($r) | Out-Null }
         $opts = '/target:winexe /optimize+'
@@ -51,7 +52,7 @@ foreach ($t in $tools) {
         }
         $cp.CompilerOptions = $opts
         $src = Get-Content (Join-Path $repo $t.Src) -Raw -Encoding UTF8
-        Add-Type -TypeDefinition $src -CompilerParameters $cp -IgnoreWarnings -ErrorAction Stop
+        Add-Type -TypeDefinition $src -CompilerParameters $cp -ErrorAction Stop
         Write-Host "    $($t.Out) 컴파일"
     } catch {
         Write-Host "    ! $($t.Out) 컴파일 실패: $($_.Exception.Message)" -ForegroundColor Yellow
