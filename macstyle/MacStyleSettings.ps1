@@ -1,20 +1,20 @@
 ﻿<#
-    맥 스타일 포인터(마우스/트랙패드) 설정 공용 함수.
-    - 빌드 시: 오프라인 Default 사용자 하이브에 적용 → 새로 만드는 모든 계정이 기본으로 맥 스타일
-    - 설치 후: 현재 사용자(HKCU)에 적용
-    둘 다 같은 함수를 쓰도록 "레지스트리 루트 경로"만 바꿔서 호출한다.
+    맥 스타일 입력(마우스/트랙패드/키보드) 공용 함수.
+    - 빌드 시: 오프라인 Default 사용자 하이브에 포인터 설정만 적용 (Set-MacPointerSettings)
+    - 설치 후: 모드 전환(lib\LiteWin.Modes.ps1)과 Install-MacStyle.ps1 이 사용
 
     예)
         . .\MacStyleSettings.ps1
         Set-MacPointerSettings -UserRoot 'HKCU:'
         Set-MacPointerSettings -UserRoot 'Registry::HKEY_LOCAL_MACHINE\LW_NTUSER'
 #>
+. (Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\LiteWin.Common.ps1')
 
 # ---------------------------------------------------------------------------
 # 마우스 가속 곡선
 #   Windows "포인터 정확도 향상"은 5개 점(X=손 움직임 속도, Y=커서 이동량)으로 된 곡선을 쓴다.
 #   값은 16.16 고정소수점을 8바이트 little-endian 으로 저장한다.
-#   맥은 윈도우보다 "느리게 움직이면 더 정밀, 빠르게 휘두르면 더 멀리" 가는 성향이라
+#   맥은 "느리게 움직이면 더 정밀, 빠르게 휘두르면 더 멀리" 가는 성향이라
 #   첫 구간 기울기는 낮추고 뒤 구간 기울기는 높였다. (실측 복제가 아닌 근사치 — 취향대로 조절)
 # ---------------------------------------------------------------------------
 $script:WindowsDefaultCurve = @{
@@ -24,6 +24,20 @@ $script:WindowsDefaultCurve = @{
 $script:MacLikeCurve = @{
     X = @(0.0, 0.43, 1.25, 3.86, 40.0)
     Y = @(0.0, 0.70, 3.40, 19.50, 520.0)
+}
+
+$script:MouseKey    = 'Control Panel\Mouse'
+$script:TouchpadKey = 'Software\Microsoft\Windows\CurrentVersion\PrecisionTouchPad'
+$script:TouchpadValues = [ordered]@{
+    TapsEnabled             = 1   # 탭하여 클릭
+    TwoFingerTapEnabled     = 1   # 두 손가락 탭 = 오른쪽 클릭 (맥과 동일)
+    RightClickZoneEnabled   = 0   # 오른쪽 아래 모서리 누르기 = 우클릭 끔 (맥엔 없음)
+    PanEnabled              = 1   # 두 손가락 스크롤
+    ScrollDirection         = 0   # 0 = 자연스러운 스크롤(손가락 내리면 화면이 올라감)
+    ZoomEnabled             = 1   # 핀치 줌
+    ThreeFingerSlideEnabled = 2   # 3손가락 좌우 = 데스크톱(Spaces) 전환, 위 = 작업보기(Mission Control)
+    FourFingerSlideEnabled  = 1   # 4손가락 좌우 = 앱 전환
+    AAPThreshold            = 1   # 손바닥 오입력 방지 민감도(0=가장 민감 ~ 3)
 }
 
 function ConvertTo-MouseCurveBytes {
@@ -37,24 +51,19 @@ function ConvertTo-MouseCurveBytes {
     return , $bytes.ToArray()
 }
 
-function Set-RegValue {
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][string]$Name,
-        [Parameter(Mandatory)]$Value,
-        [ValidateSet('String', 'DWord', 'QWord', 'Binary', 'ExpandString', 'MultiString')]
-        [string]$Type = 'DWord'
-    )
-    if (-not (Test-Path -LiteralPath $Path)) { New-Item -Path $Path -Force | Out-Null }
-    New-ItemProperty -LiteralPath $Path -Name $Name -Value $Value -PropertyType $Type -Force | Out-Null
+function Get-MacPointerSnapshotEntries {
+    <# 모드 되돌리기용: 맥 입력이 바꾸는 HKCU 값 목록 #>
+    $m = "HKCU:\$script:MouseKey"; $t = "HKCU:\$script:TouchpadKey"
+    $list = foreach ($n in 'MouseSpeed', 'MouseThreshold1', 'MouseThreshold2', 'MouseSensitivity', 'SmoothMouseXCurve', 'SmoothMouseYCurve') {
+        @{ Path = $m; Name = $n }
+    }
+    $list += foreach ($n in $script:TouchpadValues.Keys) { @{ Path = $t; Name = $n } }
+    return $list
 }
 
 function Set-PointerCurve {
-    param(
-        [Parameter(Mandatory)][string]$UserRoot,
-        [Parameter(Mandatory)][hashtable]$Curve
-    )
-    $mouse = Join-Path $UserRoot 'Control Panel\Mouse'
+    param([Parameter(Mandatory)][string]$UserRoot, [Parameter(Mandatory)][hashtable]$Curve)
+    $mouse = Join-Path $UserRoot $script:MouseKey
     Set-RegValue $mouse 'MouseSpeed'        '1'  String   # 1 = 포인터 정확도 향상(가속) 켬
     Set-RegValue $mouse 'MouseThreshold1'   '6'  String
     Set-RegValue $mouse 'MouseThreshold2'   '10' String
@@ -63,46 +72,29 @@ function Set-PointerCurve {
     Set-RegValue $mouse 'SmoothMouseYCurve' (ConvertTo-MouseCurveBytes $Curve.Y) Binary
 }
 
-# ---------------------------------------------------------------------------
-# 정밀 터치패드(Precision Touchpad) — 맥 트랙패드에 가깝게
-#   설정 > 블루투스 및 장치 > 터치패드 에서 바꾸는 값과 같은 위치다.
-#   반영은 로그아웃/재로그인 후. 값이 맞지 않으면 설정 앱에서 직접 바꾸면 그대로 덮어써진다.
-# ---------------------------------------------------------------------------
 function Set-MacTouchpad {
+    <# 정밀 터치패드 — 설정 > 블루투스 및 장치 > 터치패드 와 같은 값. 로그아웃 후 반영 #>
     param([Parameter(Mandatory)][string]$UserRoot)
-    $tp = Join-Path $UserRoot 'Software\Microsoft\Windows\CurrentVersion\PrecisionTouchPad'
-    Set-RegValue $tp 'TapsEnabled'             1   # 탭하여 클릭
-    Set-RegValue $tp 'TwoFingerTapEnabled'     1   # 두 손가락 탭 = 오른쪽 클릭 (맥과 동일)
-    Set-RegValue $tp 'RightClickZoneEnabled'   0   # 오른쪽 아래 모서리 누르기 = 우클릭 끔 (맥엔 없음)
-    Set-RegValue $tp 'PanEnabled'              1   # 두 손가락 스크롤
-    Set-RegValue $tp 'ScrollDirection'         0   # 0 = 자연스러운 스크롤(손가락 내리면 화면이 올라감)
-    Set-RegValue $tp 'ZoomEnabled'             1   # 핀치 줌
-    Set-RegValue $tp 'ThreeFingerSlideEnabled' 2   # 3손가락 좌우 = 데스크톱(Spaces) 전환, 위 = 작업보기(Mission Control)
-    Set-RegValue $tp 'FourFingerSlideEnabled'  1   # 4손가락 좌우 = 앱 전환
-    Set-RegValue $tp 'AAPThreshold'            1   # 손바닥 오입력 방지 민감도(0=가장 민감 ~ 3)
+    $tp = Join-Path $UserRoot $script:TouchpadKey
+    foreach ($k in $script:TouchpadValues.Keys) { Set-RegValue $tp $k $script:TouchpadValues[$k] }
 }
 
 function Set-MacPointerSettings {
-    <#
-        .SYNOPSIS 맥 스타일 마우스 가속 + 트랙패드 제스처를 사용자 하이브에 적용
-        .PARAMETER UserRoot  'HKCU:' 또는 로드한 오프라인 하이브 경로
-    #>
     param([Parameter(Mandatory)][string]$UserRoot)
     Set-PointerCurve -UserRoot $UserRoot -Curve $script:MacLikeCurve
     Set-MacTouchpad  -UserRoot $UserRoot
 }
 
 function Reset-PointerSettings {
-    <# .SYNOPSIS 마우스 곡선을 윈도우 기본값으로 되돌림 (터치패드는 설정 앱에서 조정) #>
+    <# 마우스 곡선을 윈도우 기본값으로 (스냅샷이 없을 때 사용) #>
     param([Parameter(Mandatory)][string]$UserRoot)
     Set-PointerCurve -UserRoot $UserRoot -Curve $script:WindowsDefaultCurve
 }
 
 function Set-NaturalMouseWheel {
     <#
-        .SYNOPSIS 마우스 휠도 맥처럼 "자연스러운 스크롤"로 뒤집기 (관리자, 실제 설치된 PC에서만)
-        .DESCRIPTION 연결된 HID 마우스마다 FlipFlopWheel 값을 바꾼다. 마우스를 다시 꽂거나 재부팅 후 반영.
-                     새 마우스를 연결하면 이 함수를 다시 실행해야 한다.
+        마우스 휠도 맥처럼 "자연스러운 스크롤" (관리자). 연결된 HID 마우스마다 FlipFlopWheel 설정.
+        재연결/재부팅 후 반영. 새 마우스를 연결하면 다시 실행해야 한다.
     #>
     param([bool]$Enable = $true)
     $value = [int]$Enable
@@ -117,4 +109,99 @@ function Set-NaturalMouseWheel {
             }
         }
     return $count
+}
+
+# ---------------------------------------------------------------------------
+# 키보드 (AutoHotkey v2 + MacKeys.ahk)
+# ---------------------------------------------------------------------------
+function Find-AutoHotkey {
+    foreach ($c in "$env:ProgramFiles\AutoHotkey\v2\AutoHotkey64.exe",
+                   "$env:LOCALAPPDATA\Programs\AutoHotkey\v2\AutoHotkey64.exe",
+                   "$env:ProgramFiles\AutoHotkey-v2\AutoHotkey64.exe") {
+        if (Test-Path $c) { return $c }
+    }
+    return $null
+}
+
+function Install-AutoHotkey {
+    $exe = Find-AutoHotkey
+    if ($exe) { return $exe }
+    if (Invoke-Winget -Id 'AutoHotkey.AutoHotkey' -Scope machine) {
+        $exe = Find-AutoHotkey
+        if ($exe) { return $exe }
+    }
+    Write-LWLog 'winget 실패 → AutoHotkey 공식 zip 으로 설치' WARN
+    $zip  = Join-Path $env:TEMP 'ahk-v2.zip'
+    $dest = "$env:ProgramFiles\AutoHotkey-v2"
+    Invoke-WebRequest -UseBasicParsing -Uri 'https://www.autohotkey.com/download/ahk-v2.zip' -OutFile $zip
+    $sig = $null
+    Expand-Archive -Path $zip -DestinationPath $dest -Force
+    Remove-Item $zip -Force
+    $exe = Find-AutoHotkey
+    if ($exe) {
+        $sig = Get-AuthenticodeSignature $exe
+        if ($sig.Status -ne 'Valid') { Write-LWLog "AutoHotkey 서명 확인 실패($($sig.Status)) — 삭제" ERROR; Remove-Item $dest -Recurse -Force; return $null }
+    }
+    return $exe
+}
+
+function Get-MacKeysTaskName { "LiteWin MacKeys ($env:USERNAME)" }
+
+function Set-MacKeysConfig {
+    <# 사용자별 MacKeys.ini (AHK 스크립트가 시작할 때 읽음) #>
+    param(
+        [bool]$CapsLockToHangul = $true,
+        [bool]$OptionWordMove   = $true,
+        [bool]$CmdQuitApp       = $true,
+        [ValidateSet('windows', 'flow')][string]$Spotlight = 'windows'
+    )
+    New-Item -ItemType Directory -Path $script:LWUserDir -Force | Out-Null
+    $ini = @"
+[MacKeys]
+CapsLockToHangul=$([int]$CapsLockToHangul)
+OptionWordMove=$([int]$OptionWordMove)
+CmdQuitApp=$([int]$CmdQuitApp)
+Spotlight=$Spotlight
+"@
+    # AHK IniRead 는 UTF-16LE 를 가장 안정적으로 읽는다
+    [IO.File]::WriteAllText((Join-Path $script:LWUserDir 'MacKeys.ini'), $ini, [Text.Encoding]::Unicode)
+}
+
+function Enable-MacKeys {
+    <# AHK 설치 → 로그인 시 관리자 권한 자동 실행 작업 등록 → 즉시 시작 #>
+    $ahk = Install-AutoHotkey
+    if (-not $ahk) { throw 'AutoHotkey 설치 실패 (인터넷 연결 확인)' }
+    $script = Join-Path $script:LWRoot 'macstyle\MacKeys.ahk'
+    if (-not (Test-Path $script)) { $script = Join-Path $PSScriptRoot 'MacKeys.ahk' }
+    if (-not (Test-Path (Join-Path $script:LWUserDir 'MacKeys.ini'))) { Set-MacKeysConfig }
+
+    $user = "$env:USERDOMAIN\$env:USERNAME"
+    $action    = New-ScheduledTaskAction -Execute $ahk -Argument "`"$script`""
+    $trigger   = New-ScheduledTaskTrigger -AtLogOn -User $user
+    $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Highest
+    $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+                    -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
+    Register-ScheduledTask -TaskName (Get-MacKeysTaskName) -TaskPath '\LiteWin\' -Action $action -Trigger $trigger `
+        -Principal $principal -Settings $settings -Force | Out-Null
+    Stop-MacKeysProcess
+    Start-ScheduledTask -TaskName (Get-MacKeysTaskName) -TaskPath '\LiteWin\'
+    Write-LWLog '맥 키보드 단축키 켬'
+}
+
+function Stop-MacKeysProcess {
+    Get-CimInstance Win32_Process -Filter "Name LIKE 'AutoHotkey%'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like '*MacKeys.ahk*' } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+}
+
+function Disable-MacKeys {
+    <# 작업은 지우지 않고 '사용 안 함'으로 → 다시 켤 때 빠름 #>
+    Disable-ScheduledTask -TaskName (Get-MacKeysTaskName) -TaskPath '\LiteWin\' -ErrorAction SilentlyContinue | Out-Null
+    Stop-MacKeysProcess
+    Write-LWLog '맥 키보드 단축키 끔'
+}
+
+function Remove-MacKeys {
+    Unregister-ScheduledTask -TaskName (Get-MacKeysTaskName) -TaskPath '\LiteWin\' -Confirm:$false -ErrorAction SilentlyContinue
+    Stop-MacKeysProcess
 }

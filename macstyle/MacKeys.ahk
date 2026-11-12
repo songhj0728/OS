@@ -10,7 +10,7 @@
 ;  맥 키보드(Magic Keyboard)를 연결한 경우에도 같은 위치라 그대로 쓰면 된다.
 ;
 ;  잠시 끄기/켜기 :  Ctrl + Alt + Win + F12   (트레이 아이콘이 바뀜)
-;  설정 바꾸기   :  아래 "설정" 부분의 true/false 수정 후 트레이 아이콘 우클릭 > Reload Script
+;  설정 바꾸기   :  시작 메뉴 > LiteWin 설정 (또는 %LOCALAPPDATA%\LiteWin\MacKeys.ini 수정 후 Reload)
 ; =============================================================================
 #Requires AutoHotkey v2.0
 #SingleInstance Force
@@ -20,9 +20,39 @@ SendMode "Input"
 A_MenuMaskKey := "vkE8"   ; Alt/Win 단독 눌림으로 메뉴·시작메뉴가 튀어나오는 것 방지
 
 ; ------------------------------ 설정 ---------------------------------------
-global CapsLockToHangul := true   ; Caps Lock 짧게 = 한/영 전환, 길게(0.3초) = 대문자 고정 (맥과 동일)
-global OptionWordMove   := true   ; ⌥←/→ = 단어 단위 이동, ⌥⌫ = 단어 삭제 (Win+←/→ 창 스냅은 ⌃⌘←/→ 로 이동)
-global CmdQuitApp       := true   ; ⌘Q = 앱 종료(Alt+F4)
+; LiteWin 설정 앱이 사용자별 MacKeys.ini 에 저장한다. 파일이 없으면 아래 기본값.
+global IniFile := EnvGet("LOCALAPPDATA") "\LiteWin\MacKeys.ini"
+ReadOpt(name, def) {
+    try return IniRead(IniFile, "MacKeys", name, def)
+    catch
+        return def
+}
+global CapsLockToHangul := ReadOpt("CapsLockToHangul", "1") = "1"  ; Caps Lock 짧게 = 한/영, 길게(0.3초) = 대문자 고정
+global OptionWordMove   := ReadOpt("OptionWordMove", "1") = "1"    ; ⌥←/→ 단어 이동, ⌥⌫ 단어 삭제 (창 스냅은 ⌃⌘방향키)
+global CmdQuitApp       := ReadOpt("CmdQuitApp", "1") = "1"        ; ⌘Q = 앱 종료(Alt+F4)
+global Spotlight        := ReadOpt("Spotlight", "windows")         ; windows = Windows 검색, flow = Flow Launcher(Alt+Space)
+global GameAutoOff      := ReadOpt("GameAutoOff", "1") = "1"       ; 전체화면(테두리 없는) 게임 중에는 자동으로 매핑 끔
+
+; 전체화면 앱(대부분의 게임)인지: 제목표시줄이 없고 화면 전체를 덮는 창
+IsFullscreen() {
+    if !GameAutoOff
+        return false
+    try {
+        hwnd := WinExist("A")
+        if !hwnd
+            return false
+        cls := WinGetClass(hwnd)
+        if (cls = "Progman" || cls = "WorkerW" || cls = "Shell_TrayWnd")
+            return false
+        if (WinGetStyle(hwnd) & 0xC00000)   ; WS_CAPTION 이 있으면 일반 창
+            return false
+        WinGetPos(&x, &y, &w, &h, hwnd)
+        return (x <= 0 && y <= 0 && w >= A_ScreenWidth && h >= A_ScreenHeight)
+    } catch {
+        return false
+    }
+}
+Active() => !WinActive("ahk_group NoRemap") && !IsFullscreen()
 
 ; 이 프로그램이 앞에 있을 때는 매핑을 전부 끈다 (게임, 원격데스크톱, 가상머신 등)
 GroupAdd "NoRemap", "ahk_exe mstsc.exe"
@@ -47,12 +77,12 @@ GroupAdd "Terminal", "ahk_exe mintty.exe"
 #SuspendExempt false
 
 ; ======================= 여기부터 매핑 (NoRemap 제외) ======================
-#HotIf !WinActive("ahk_group NoRemap")
+#HotIf Active()
 
 ; ---- ⌘ + 글자/숫자 → Ctrl + 같은 키 (⇧ 조합 포함) ----
 ; ⌘A 전체선택, ⌘S 저장, ⌘F 찾기, ⌘T 새 탭, ⌘N 새 창, ⌘P 인쇄, ⌘1~9 탭 이동 ...
 ; (Hotkey() 함수는 #HotIf 가 아니라 HotIf() 조건을 따르므로 여기서 따로 지정)
-HotIf (*) => !WinActive("ahk_group NoRemap")
+HotIf (*) => Active()
 for key in StrSplit("a b d e f g i j k l n o p r s t u y = - / . ;", " ") {
     Hotkey "<!" key,  SendCtrl.Bind(key)
     Hotkey "<!+" key, SendCtrl.Bind("+" key)       ; ⌘⇧T(닫은 탭 다시 열기) 등
@@ -86,7 +116,7 @@ SendCtrl(keys, *) => Send("^" keys)
 ; ⌘Tab 은 왼쪽 Alt+Tab 그대로라 따로 매핑하지 않음
 
 ; Spotlight / 강제 종료 / 설정
-<!Space:: Send "#s"                   ; ⌘Space = 검색
+<!Space:: Send(Spotlight = "flow" ? "!{Space}" : "#s")   ; ⌘Space = 검색 (Flow Launcher 선택 시 Alt+Space)
 <!<#Esc:: Send "^+{Esc}"              ; ⌘⌥Esc = 작업 관리자
 <!<^q:: DllCall("LockWorkStation")    ; ⌃⌘Q = 화면 잠금
 
@@ -114,7 +144,7 @@ SendCtrl(keys, *) => Send("^" keys)
 <^<!Up::    Send "#{Up}"
 <^<!Down::  Send "#{Down}"
 
-#HotIf !WinActive("ahk_group NoRemap") && OptionWordMove
+#HotIf Active() && OptionWordMove
 <#Left::   Send "^{Left}"
 <#Right::  Send "^{Right}"
 <#+Left::  Send "^+{Left}"
@@ -123,7 +153,7 @@ SendCtrl(keys, *) => Send("^" keys)
 <#Delete:: Send "^{Delete}"
 
 ; ---- Caps Lock = 한/영 ----
-#HotIf !WinActive("ahk_group NoRemap") && CapsLockToHangul
+#HotIf Active() && CapsLockToHangul
 *CapsLock:: {
     if KeyWait("CapsLock", "T0.3") {          ; 0.3초 안에 뗌 → 한/영
         Send "{vk15}"

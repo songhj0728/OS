@@ -40,6 +40,50 @@ if ($p.DisableHibernation) {
 
 # 예약 저장소(업데이트용 7GB 가량 미리 잡아두는 공간)는 업데이트 안정성을 위해 그대로 둔다.
 
+# ---------------------------------------------------------------- Chrome (기본 브라우저)
+$chromeMsi = Join-Path $root 'payload\chrome.msi'
+$chromeOk = $false
+if (Test-Path $chromeMsi) {
+    try {
+        $proc = Start-Process msiexec.exe -ArgumentList '/i', "`"$chromeMsi`"", '/qn', '/norestart' -Wait -PassThru
+        Log "Chrome 설치 종료 코드: $($proc.ExitCode)"
+        $chromeOk = $proc.ExitCode -in 0, 3010
+        # 첫 실행 안내/기본 브라우저 묻기/가져오기 화면 생략 (정책이 아니라서 '관리됨' 표시 없음)
+        $appDir = "$env:ProgramFiles\Google\Chrome\Application"
+        if (Test-Path $appDir) {
+            @'
+{
+  "distribution": {
+    "skip_first_run_ui": true,
+    "suppress_first_run_default_browser_prompt": true,
+    "import_bookmarks": false,
+    "import_history": false,
+    "import_search_engine": false,
+    "make_chrome_default_for_user": false
+  },
+  "browser": { "check_default_browser": false }
+}
+'@ | Set-Content (Join-Path $appDir 'initial_preferences') -Encoding ASCII
+        }
+        Remove-Item $chromeMsi -Force -ErrorAction SilentlyContinue
+    } catch { Log "Chrome 설치 실패: $_" }
+}
+
+# ---------------------------------------------------------------- Edge 제거 (WebView2 유지) + 링크 리다이렉트
+if ($p.RemoveEdge) {
+    if (-not $chromeOk -and -not (Test-Path "$env:ProgramFiles\Google\Chrome\Application\chrome.exe")) {
+        Log 'Chrome 이 설치되지 않아 Edge 제거를 건너뜀 (브라우저가 하나도 없게 되는 것 방지)'
+        @{ RemoveEdge = $false; EdgeRedirect = $false } | ConvertTo-Json | Set-Content (Join-Path $root 'machine.json') -Encoding UTF8
+    } else {
+        try {
+            . (Join-Path $root 'lib\LiteWin.Edge.ps1')
+            [void](Remove-EdgeBrowser)
+            Register-EdgeRedirect
+            Register-EdgeGuardTask
+        } catch { Log "Edge 처리 실패: $_" }
+    }
+}
+
 # 설치 이미지에 남은 임시 파일 정리
 Remove-Item "$env:WINDIR\Setup\Scripts\*.log" -ErrorAction SilentlyContinue
 Log '완료'

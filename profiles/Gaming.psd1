@@ -1,19 +1,12 @@
-﻿# Gaming: Standard 기반 + Xbox/게임 관련 구성요소 유지.
-# (Game Pass, Xbox 로그인이 필요한 게임, 게임 바 녹화 등)
-# 맥 스타일 키 매핑은 MacKeys.ahk 의 NoRemap 그룹에 게임 exe를 넣어 게임 중에는 꺼지게 할 수 있다.
+﻿# Gaming: Standard 와 같은 제거 목록 + 첫 로그인 마법사에서 게임 런처를 미리 선택.
+# Xbox 는 기본 해제(옵션). 마법사의 [모두 해제] / [앱 설치 건너뛰기] 로 아무것도 안 깔 수도 있다.
+# 맥 키 매핑은 전체화면 게임 중에 자동으로 꺼진다(MacKeys.ahk GameAutoOff).
 @{
     Name        = 'Gaming'
-    Description = 'Standard + Xbox 앱/게임바/로그인 유지'
+    Description = 'Standard + 게임 런처/Discord/그래픽 드라이버를 마법사에서 미리 선택'
 
     AddRemoveAppx = @()
-    KeepAppx      = @(
-        'Microsoft.Xbox.TCUI'
-        'Microsoft.XboxApp'
-        'Microsoft.XboxGameOverlay'
-        'Microsoft.XboxGamingOverlay'
-        'Microsoft.XboxSpeechToTextOverlay'
-        'Microsoft.GamingApp'
-    )
+    KeepAppx      = @()
 
     AddRemoveCapabilities = @()
     KeepCapabilities      = @()
@@ -25,4 +18,10 @@
     AddDisableTasks    = @()
 
     Overrides = @{}
+
+    Defaults = @{
+        Mode      = 'MacInput'
+        UiOptions = @()
+        Apps      = @('steam', 'epic', 'discord', 'gpu-driver')
+    }
 }

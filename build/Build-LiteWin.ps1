@@ -4,8 +4,11 @@
     공식 Windows 11 ISO 로 가벼운 Pro 설치 ISO(LiteWin)를 만든다.
 
 .DESCRIPTION
-    Microsoft 공식 ISO → Pro 에디션만 추출 → 번들앱/불필요 기능 제거 → 광고·원격분석·Copilot 정책 적용
-    → 맥 스타일 기본값/설치 후 스크립트 삽입 → autounattend.xml 생성 → 부팅 가능한 ISO 생성.
+    Microsoft 공식 ISO(없으면 Microsoft 서버에서 직접 다운로드) → Pro 에디션만 추출
+    → 번들앱/Office/Edge 패키지/불필요 기능 제거 → 광고·원격분석·Copilot 정책 적용
+    → Chrome(기본 브라우저)·LiteWin 설정 앱·설치 후 스크립트 삽입 → autounattend.xml → 부팅 가능한 ISO.
+
+    LiteWin 은 ISO 를 배포하지 않는다. 원본은 항상 Microsoft 에서 받고, 결과물은 본인 PC 에서만 쓴다.
 
     tiny11 류와 다른 점:
       * 시스템 파일을 강제로 지우지 않는다(WinSxS, 업데이트 스택, .NET, VC 런타임, 드라이버 저장소 유지)
@@ -15,11 +18,12 @@
 
     준비물:
       * Windows 10/11 PC, 관리자 권한 Windows PowerShell 5.1
-      * 공식 Windows 11 ISO (https://www.microsoft.com/software-download/windows11)
+      * 공식 Windows 11 ISO — 없으면 -IsoPath 를 빼고 실행하면 Microsoft 에서 직접 받는다
+      * 인터넷 (ISO 다운로드, Chrome 설치 파일 포함)
       * Windows ADK 의 "배포 도구"(oscdimg.exe) — ISO 를 만들 때만 필요
       * 작업 폴더 여유 공간 약 25GB (NTFS)
 
-.PARAMETER IsoPath           공식 Windows 11 ISO 경로
+.PARAMETER IsoPath           공식 Windows 11 ISO 경로 (생략 시 build\Get-WindowsIso.ps1 로 Microsoft 에서 다운로드)
 .PARAMETER ProfileName       Standard(기본) / Minimal / Gaming — profiles\ 폴더의 이름
 .PARAMETER OutputIso         결과 ISO 경로 (기본: 이 저장소\out\LiteWin-<프로필>.iso)
 .PARAMETER WorkDir           작업 폴더 (공백 없는 경로, 기본 C:\LiteWinWork)
@@ -30,16 +34,18 @@
 .PARAMETER SplitForFat32     install.wim 이 4GB 를 넘으면 install.swm 으로 분할 (FAT32 USB 용)
 .PARAMETER OscdimgPath       oscdimg.exe 경로 (기본: ADK 설치 경로 자동 탐색)
 .PARAMETER NoIso             ISO 를 만들지 않고 WorkDir\iso 폴더까지만 (Rufus 등으로 직접 USB 굽기)
+.PARAMETER NoChrome          Chrome 을 넣지 않음 (Edge 도 제거하지 않음)
 
 .EXAMPLE
     Set-ExecutionPolicy -Scope Process Bypass
+    .\build\Build-LiteWin.ps1                       # ISO 를 Microsoft 에서 받아서 빌드
     .\build\Build-LiteWin.ps1 -IsoPath D:\Win11_24H2_Korean_x64.iso
 .EXAMPLE
     .\build\Build-LiteWin.ps1 -IsoPath D:\Win11.iso -ProfileName Minimal -SplitForFat32
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateScript({ Test-Path $_ -PathType Leaf })][string]$IsoPath,
+    [string]$IsoPath,
     [string]$ProfileName = 'Standard',
     [string]$OutputIso,
     [string]$WorkDir = 'C:\LiteWinWork',
@@ -50,6 +56,7 @@ param(
     [switch]$SplitForFat32,
     [string]$OscdimgPath,
     [switch]$NoIso,
+    [switch]$NoChrome,
     [switch]$KeepWorkDir
 )
 
@@ -57,7 +64,8 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'   # DISM cmdlet 진행표시줄이 매우 느려서 끔
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'OfflineTweaks.ps1')
-. (Join-Path $RepoRoot 'macstyle\MacStyleSettings.ps1')
+. (Join-Path $RepoRoot 'lib\LiteWin.Common.ps1')
+$ChromeMsiUrl = 'https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise64.msi'
 
 $sw = [Diagnostics.Stopwatch]::StartNew()
 function Step($msg)  { Write-Host ("`n[{0:mm\:ss}] == {1}" -f $sw.Elapsed, $msg) -ForegroundColor Cyan }
@@ -68,6 +76,11 @@ function Warn($msg)  { Write-Host "    ! $msg" -ForegroundColor Yellow }
 if ($env:OS -ne 'Windows_NT') { throw 'Windows 에서 실행해야 합니다 (DISM 필요).' }
 if ($WorkDir -match '\s') { throw "WorkDir 에 공백이 없어야 합니다: $WorkDir" }
 if (-not $OutputIso) { $OutputIso = Join-Path $RepoRoot "out\LiteWin-$ProfileName.iso" }
+if (-not $IsoPath) {
+    Step 'ISO 가 지정되지 않음 → Microsoft 에서 직접 다운로드'
+    $IsoPath = & (Join-Path $PSScriptRoot 'Get-WindowsIso.ps1') | Select-Object -Last 1
+}
+if (-not (Test-Path $IsoPath -PathType Leaf)) { throw "ISO 파일이 없습니다: $IsoPath" }
 
 $drive = (Split-Path -Qualifier $WorkDir).TrimEnd(':')
 $free  = (Get-PSDrive $drive).Free / 1GB
@@ -113,9 +126,12 @@ $cfg = [ordered]@{
     ManualServices     = Merge-List $common.ManualServices $prof.AddManualServices
     DisableTasks       = Merge-List $common.DisableTasks $prof.AddDisableTasks
 }
-foreach ($k in 'DisableHibernation', 'DisableSearchIndexing', 'DisableSysMain', 'RemoveOneDrive', 'MacStyle', 'ResetBase') {
+foreach ($k in 'DisableHibernation', 'DisableSearchIndexing', 'DisableSysMain', 'RemoveOneDrive', 'IncludeChrome', 'RemoveEdge', 'ResetBase') {
     $cfg[$k] = if ($prof.Overrides -and $prof.Overrides.ContainsKey($k)) { [bool]$prof.Overrides[$k] } else { [bool]$common[$k] }
 }
+if ($NoChrome) { $cfg.IncludeChrome = $false }
+if (-not $cfg.IncludeChrome) { $cfg.RemoveEdge = $false }   # 브라우저가 하나도 없게 되는 것 방지
+$cfg.Defaults = if ($prof.Defaults) { $prof.Defaults } else { @{ Mode = 'Lite'; UiOptions = @(); Apps = @() } }
 # 같은 서비스가 Disable/Manual 양쪽에 있으면 Disable 우선
 $cfg.ManualServices = @($cfg.ManualServices | Where-Object { $cfg.DisableServices -notcontains $_ })
 Info $cfg.Description
@@ -179,6 +195,17 @@ try {
         Dismount-DiskImage -ImagePath (Resolve-Path $IsoPath).Path | Out-Null
     }
     Get-ChildItem $isoDir -Recurse -File | ForEach-Object { $_.IsReadOnly = $false }
+
+    $chromeMsi = Join-Path $tmpDir 'chrome.msi'
+    if ($cfg.IncludeChrome) {
+        Step 'Chrome 기업용 설치 파일 다운로드 (Google 공식)'
+        Invoke-WebRequest -UseBasicParsing -Uri $ChromeMsiUrl -OutFile $chromeMsi
+        $sig = Get-AuthenticodeSignature $chromeMsi
+        if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'Google') {
+            throw "Chrome 설치 파일 서명 확인 실패: $($sig.Status) $($sig.SignerCertificate.Subject)"
+        }
+        Info ("서명 확인: {0}" -f $sig.SignerCertificate.Subject)
+    }
 
     # ========================================================== 3. Pro 이미지 추출
     Step 'Pro 에디션 찾기'
@@ -260,22 +287,52 @@ try {
                 Remove-ItemProperty -LiteralPath $p -Name $v.Name -Force; Info "- 값 삭제: $($v.Path)\$($v.Name)"
             }
         }
-        if ($cfg.MacStyle) {
-            Set-MacPointerSettings -UserRoot (HivePath 'NTUSER' '')
-            Info '새 사용자 기본값: 맥 스타일 마우스 가속/트랙패드'
-        }
+        # 맥 스타일 포인터 값은 여기서 넣지 않는다: 첫 로그인 마법사에서 고르고,
+        # '라이트 윈도우' 로 되돌릴 때 원래 Windows 값을 복원할 수 있어야 하기 때문.
     } finally {
         Dismount-Hives
     }
 
     # ========================================================== 7. 설치 후 스크립트 삽입
-    Step '설치 후 스크립트/맥 스타일 파일 복사'
+    Step '설치 후 스크립트 / LiteWin 설정 앱 / 맥 스타일 파일 복사'
     $scripts = Join-Path $mountDir 'Windows\Setup\Scripts'
     $lw      = Join-Path $mountDir 'ProgramData\LiteWin'
-    New-Item -ItemType Directory -Path $scripts, "$lw\macstyle", "$lw\logs" -Force | Out-Null
+    New-Item -ItemType Directory -Path $scripts, "$lw\logs", "$lw\bin", "$lw\payload" -Force | Out-Null
     Copy-Item (Join-Path $RepoRoot 'setup\*') $scripts -Force
-    Copy-Item (Join-Path $RepoRoot 'macstyle\*') "$lw\macstyle" -Force
-    $cfg | ConvertTo-Json -Depth 4 | Out-File (Join-Path $lw 'profile.json') -Encoding utf8
+    foreach ($d in 'lib', 'app', 'apps', 'macstyle') {
+        Copy-Item (Join-Path $RepoRoot $d) $lw -Recurse -Force
+    }
+    $cfg | ConvertTo-Json -Depth 5 | Out-File (Join-Path $lw 'profile.json') -Encoding utf8
+    @{ RemoveEdge = $cfg.RemoveEdge; EdgeRedirect = $cfg.RemoveEdge } | ConvertTo-Json |
+        Out-File (Join-Path $lw 'machine.json') -Encoding utf8
+
+    # Edge 링크 → Chrome 리다이렉트 (작은 exe, 상주 안 함)
+    try {
+        Add-Type -TypeDefinition (Get-Content (Join-Path $RepoRoot 'lib\EdgeRedirect.cs') -Raw) `
+            -OutputAssembly (Join-Path $lw 'bin\LiteWinEdgeRedirect.exe') -OutputType WindowsApplication
+        Info 'LiteWinEdgeRedirect.exe 컴파일'
+    } catch { Warn "Edge 리다이렉트 컴파일 실패 — 이 기능 없이 진행: $($_.Exception.Message)" }
+
+    if ($cfg.IncludeChrome) {
+        Copy-Item $chromeMsi (Join-Path $lw 'payload\chrome.msi') -Force
+        Step '기본 앱: Chrome (DISM 기본 앱 연결)'
+        & dism.exe /English /Image:$mountDir "/Import-DefaultAppAssociations:$(Join-Path $RepoRoot 'unattend\DefaultAppAssociations.xml')" | Out-Null
+        if ($LASTEXITCODE -ne 0) { Warn "기본 앱 연결 가져오기 실패 (dism $LASTEXITCODE)" }
+        # 작업표시줄 고정: 탐색기 + Chrome (Edge/Store 고정 제거)
+        $shell = Join-Path $mountDir 'Users\Default\AppData\Local\Microsoft\Windows\Shell'
+        New-Item -ItemType Directory -Path $shell -Force | Out-Null
+        Copy-Item (Join-Path $RepoRoot 'unattend\LayoutModification.xml') $shell -Force
+    }
+
+    # 시작 메뉴 > LiteWin 설정
+    $lnkPath = Join-Path $mountDir 'ProgramData\Microsoft\Windows\Start Menu\Programs\LiteWin 설정.lnk'
+    $wsh = New-Object -ComObject WScript.Shell
+    $lnk = $wsh.CreateShortcut($lnkPath)
+    $lnk.TargetPath  = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+    $lnk.Arguments   = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\ProgramData\LiteWin\app\LiteWinSettings.ps1"'
+    $lnk.IconLocation = 'C:\Windows\System32\imageres.dll,109'
+    $lnk.Description = '모드(라이트/맥 입력/맥 UI), 추가 앱, 브라우저 설정'
+    $lnk.Save()
 
     # ========================================================== 8. 정리 + 저장
     if ($cfg.ResetBase) {

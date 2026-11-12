@@ -4,7 +4,9 @@
 @{
     # ---- 제거할 기본 앱 (AppX provisioned package) ----
     # 주의: Store, App Installer(winget), VCLibs, UI.Xaml, 보안센터(SecHealthUI),
-    #       계산기, 메모장, 그림판, 캡처도구, 터미널은 일부러 넣지 않았다(유지).
+    #       계산기, 메모장, 그림판, 캡처도구, 터미널, 사진, 미디어 플레이어(ZuneMusic)는 유지.
+    #       Office 계열(Microsoft 365, OneNote, Outlook)은 모두 제거.
+    #       Xbox 는 이미지에서 빼고, 필요하면 LiteWin 설정 > 게임 에서 다시 설치(옵션).
     RemoveAppx = @(
         'Clipchamp.Clipchamp'
         'Microsoft.549981C3F5F10'          # Cortana
@@ -31,8 +33,11 @@
         'Microsoft.WindowsMaps'
         'Microsoft.WindowsSoundRecorder'
         'Microsoft.YourPhone'
-        'Microsoft.ZuneMusic'
-        'Microsoft.ZuneVideo'
+        'Microsoft.ZuneVideo'              # 영화 및 TV (미디어 플레이어로 대체)
+        'Microsoft.MicrosoftEdge.Stable'   # Edge 브라우저 패키지 (본체는 설치 후 제거, WebView2 유지)
+        'Microsoft.XboxIdentityProvider'
+        'Microsoft.MicrosoftJournal'
+        'Microsoft.Office.Sway'
         'microsoft.windowscommunicationsapps' # 메일/일정
         'MicrosoftCorporationII.MicrosoftFamily'
         'MicrosoftCorporationII.QuickAssist'
@@ -102,6 +107,7 @@
     DisableSearchIndexing = $false   # true면 WSearch 비활성(시작메뉴 파일검색/Outlook 검색 느려짐)
     DisableSysMain        = $false   # true면 SysMain(Superfetch) 비활성. SSD에서는 영향 적음
     RemoveOneDrive        = $true    # 새 사용자 첫 로그인 시 OneDrive 자동설치 막기
-    MacStyle              = $true    # 맥 스타일 키보드/마우스/트랙패드 적용
+    IncludeChrome         = $true    # Chrome 기업용 설치 파일을 이미지에 포함, 기본 브라우저로 지정
+    RemoveEdge            = $true    # 설치 직후 Edge 브라우저 제거 (WebView2 유지) + Edge 링크를 Chrome 으로
     ResetBase             = $true    # 구성요소 정리(/ResetBase). 업데이트는 계속 됨, 단 이전 업데이트 제거 불가
 }
