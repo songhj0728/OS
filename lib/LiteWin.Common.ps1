@@ -130,11 +130,30 @@ function Wait-Winget {
     return $null
 }
 
+try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+
 function Test-Internet {
-    try {
-        $r = Invoke-WebRequest -UseBasicParsing -Uri 'https://www.msftconnecttest.com/connecttest.txt' -TimeoutSec 8
-        return ($r.Content -like 'Microsoft Connect Test*')
-    } catch { return $false }
+    <#
+        인터넷 연결 확인. 1) Windows 네트워크 상태(NCSI) 2) 여러 주소에 직접 요청.
+        (msftconnecttest 는 http 전용이라 https 로 부르면 항상 실패하므로 http 로 부른다)
+    #>
+    param([int]$WaitSeconds = 0)
+    $deadline = (Get-Date).AddSeconds($WaitSeconds)
+    do {
+        try {
+            $ok = Get-NetConnectionProfile -ErrorAction Stop |
+                  Where-Object { $_.IPv4Connectivity -eq 'Internet' -or $_.IPv6Connectivity -eq 'Internet' }
+            if ($ok) { return $true }
+        } catch { }
+        foreach ($u in 'http://www.msftconnecttest.com/connecttest.txt', 'https://www.google.com/generate_204', 'https://www.microsoft.com/') {
+            try {
+                $r = Invoke-WebRequest -UseBasicParsing -Uri $u -TimeoutSec 8 -ErrorAction Stop
+                if ($r.StatusCode -lt 400) { return $true }
+            } catch { }
+        }
+        if ((Get-Date) -lt $deadline) { Start-Sleep -Seconds 5 }
+    } while ((Get-Date) -lt $deadline)
+    return $false
 }
 
 function Invoke-Winget {

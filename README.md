@@ -12,12 +12,12 @@
 
 | 빠짐 | 남음 / 대체 |
 |---|---|
-| **Edge 브라우저** (화면 어디에도 안 보임) | **WebView2 런타임 유지**: 앱 화면 표시용이라 게임 런처, Discord, 위젯 등이 필요로 함 |
+| **Edge 브라우저** — 설치 이미지 단계에서 제거 (파일 연결·연결 프로그램 목록에도 안 남음) | **WebView2 런타임 유지**: 앱 화면 표시용이라 게임 런처, Discord, 위젯 등이 필요로 함 |
 | Edge 전용 링크(`microsoft-edge:`) | **Chrome으로 자동 연결** (작은 리다이렉트 프로그램, 상주 안 함) |
 | — | **Google Chrome = 기본 브라우저** (설치 이미지에 포함, 작업표시줄 고정) |
 | Office 계열 (Microsoft 365, OneNote, Outlook) | — |
 | Copilot, Recall, 위젯, Teams 자동설치, 광고·추천, Bing 웹검색 | Windows Update, Defender, 방화벽 |
-| Clipchamp, 뉴스, 날씨, 솔리테어, 지도, 영화 및 TV 등 | **사진, 미디어 플레이어**, 캡처 도구, 계산기, 메모장, 그림판, 터미널 |
+| 위젯, Clipchamp, 뉴스, 날씨, 솔리테어, 지도, 영화 및 TV 등 | **사진, 미디어 플레이어**, 캡처 도구, 계산기, 메모장, 그림판, 터미널 |
 | Xbox 앱 일체 (게임 탭에서 다시 설치 가능) | Microsoft Store, winget, 한국어 IME, .NET, VC++ 런타임 |
 
 Edge를 다시 쓰고 싶으면 LiteWin 설정 > 브라우저에서 체크를 해제하면 다시 설치됩니다.

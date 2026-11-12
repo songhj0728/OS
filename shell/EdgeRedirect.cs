@@ -1,11 +1,9 @@
 // LiteWinEdgeRedirect.exe
 // Edge 를 지운 뒤에도 Windows 일부(설정 도움말, 시작메뉴/위젯 링크 등)는 "microsoft-edge:" 링크로 Edge 를 부른다.
-// 이 작은 프로그램이 그 링크를 받아 Chrome(없으면 기본 브라우저)으로 연다. 상주하지 않는다.
+// 이 작은 프로그램이 그 링크를 받아 기본 브라우저(LiteWin 이 설치한 Chromium 계열)로 연다. 상주하지 않는다.
 // 빌드 시 Build-LiteWin.ps1 이 Add-Type 으로 컴파일한다(.NET Framework 4.x, 외부 의존성 없음).
 using System;
 using System.Diagnostics;
-using System.IO;
-using Microsoft.Win32;
 
 public static class LiteWinEdgeRedirect
 {
@@ -16,14 +14,9 @@ public static class LiteWinEdgeRedirect
         if (url == null) return 1;
         url = BingToGoogle(url);
 
-        string chrome = FindChrome();
         try
         {
-            ProcessStartInfo psi;
-            if (chrome != null)
-                psi = new ProcessStartInfo(chrome, "\"" + url.Replace("\"", "%22") + "\"");
-            else
-                psi = new ProcessStartInfo(url);   // 기본 브라우저
+            ProcessStartInfo psi = new ProcessStartInfo(url);   // http/https 기본 앱 = 설치된 브라우저
             psi.UseShellExecute = true;
             Process.Start(psi);
             return 0;
@@ -75,26 +68,5 @@ public static class LiteWinEdgeRedirect
             }
         }
         return url;
-    }
-
-    static string FindChrome()
-    {
-        string[] keys = {
-            @"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe",
-            @"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe"
-        };
-        foreach (RegistryKey hive in new[] { Registry.LocalMachine, Registry.CurrentUser })
-        {
-            foreach (string k in keys)
-            {
-                using (RegistryKey key = hive.OpenSubKey(k))
-                {
-                    if (key == null) continue;
-                    string p = key.GetValue("") as string;
-                    if (!string.IsNullOrEmpty(p) && File.Exists(p.Trim('"'))) return p.Trim('"');
-                }
-            }
-        }
-        return null;
     }
 }

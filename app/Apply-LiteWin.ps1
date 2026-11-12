@@ -28,15 +28,21 @@ Write-Host "`n=== LiteWin 적용 ===" -ForegroundColor Cyan
 
 # ---- 1. 인터넷 / winget 이 필요한 작업인지 ----
 $needNet = $apps.Count -gt 0 -or $c.Mode -ne 'Lite' -or (-not (Test-WebView2Installed))
-if ($needNet -and -not (Test-Internet)) {
-    Write-LWLog '인터넷에 연결되어 있지 않습니다. 연결 후 시작 메뉴 > LiteWin 설정 에서 다시 적용하세요.' WARN
-    if ($apps.Count) { $failed += '앱 설치 (인터넷 없음)' ; $apps = @() }
+if ($needNet -and -not (Test-Internet -WaitSeconds 45)) {
+    # 확인이 틀릴 수도 있으므로 설치는 그대로 시도한다 (실패하면 항목별로 알려줌)
+    Write-LWLog '인터넷 연결을 확인하지 못했습니다 — 그래도 설치를 시도합니다.' WARN
 }
 
 # ---- 2. WebView2 확인 (Edge 를 지워도 꼭 필요) ----
 if (-not (Test-WebView2Installed)) {
     Write-LWLog 'WebView2 런타임 설치'
     if (-not (Invoke-Winget -Id 'Microsoft.EdgeWebView2Runtime' -Scope machine)) { $failed += 'WebView2 런타임' }
+}
+
+# ---- 2-1. 브라우저 확인 (설치 중 Chrome 설치가 실패했으면 다시) ----
+if (-not (Test-Path "$env:ProgramFiles\Google\Chrome\Application\chrome.exe")) {
+    Write-LWLog 'Chrome 이 없어 다시 설치합니다'
+    if (-not (Invoke-Winget -Id 'Google.Chrome' -Scope machine)) { $failed += 'Chrome' }
 }
 
 # ---- 3. 앱 설치 ----

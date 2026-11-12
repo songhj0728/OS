@@ -27,7 +27,7 @@ function Get-OpenShellExe {
 function Get-LWShellOptions {
     <# 상태 파일의 Shell 옵션 + 기본값 #>
     param($State = (Get-LWState))
-    $o = [ordered]@{ ClassicTaskbar = $true; ClassicStart = $true; Caption = 'traffic' }
+    $o = [ordered]@{ ClassicTaskbar = $true; ClassicStart = $true; TaskbarLabels = $false; Caption = 'traffic' }
     if ($State.Shell) {
         foreach ($p in $State.Shell.PSObject.Properties) { $o[$p.Name] = $p.Value }
     }
@@ -78,13 +78,14 @@ function Set-OpenShellAutoStart([bool]$On) {
     }
 }
 
-function Set-NativeTaskbarStyle([ValidateSet('Classic', 'Mac')][string]$Style) {
-    <# RetroBar 를 끈 경우에도 최대한 클래식하게: 왼쪽 정렬 + 단추 결합 안 함(이름 표시) #>
+function Set-NativeTaskbarStyle([ValidateSet('Classic', 'Mac')][string]$Style, [bool]$Labels = $false) {
+    <# 클래식: 왼쪽 정렬. 단추 펼쳐 보기(이름 표시, 묶지 않기)는 옵션 #>
     $adv = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'
     if ($Style -eq 'Classic') {
+        $glom = if ($Labels) { 2 } else { 0 }
         Set-RegValue $adv 'TaskbarAl' 0
-        Set-RegValue $adv 'TaskbarGlomLevel' 2
-        Set-RegValue $adv 'MMTaskbarGlomLevel' 2
+        Set-RegValue $adv 'TaskbarGlomLevel' $glom
+        Set-RegValue $adv 'MMTaskbarGlomLevel' $glom
     } else {
         Set-RegValue $adv 'TaskbarAl' 1
         Set-RegValue $adv 'TaskbarGlomLevel' 0
@@ -102,7 +103,7 @@ function Start-LWShell {
     $o = Get-LWShellOptions -State $State
     $mac = $mode -eq 'MacUI'
 
-    if ($Apply) { Set-NativeTaskbarStyle $(if ($mac) { 'Mac' } else { 'Classic' }) }
+    if ($Apply) { Set-NativeTaskbarStyle $(if ($mac) { 'Mac' } else { 'Classic' }) ([bool]$o.TaskbarLabels) }
 
     # ---- 클래식 작업표시줄 (RetroBar) ----
     $rb = Get-RetroBarExe

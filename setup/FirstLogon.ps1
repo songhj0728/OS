@@ -10,8 +10,12 @@ $log  = Join-Path $root 'logs\FirstLogon.log'
 New-Item -ItemType Directory -Path (Split-Path $log) -Force | Out-Null
 Start-Transcript -Path $log -Append | Out-Null
 
+$exe = Join-Path $root 'bin\LiteWinSettings.exe'
 $settings = Join-Path $root 'app\LiteWinSettings.ps1'
-if (Test-Path $settings) {
+if (Test-Path $exe) {
+    Start-Process $exe -ArgumentList '-FirstRun'     # 콘솔 창 없이 바로 열림
+    Write-Output 'LiteWin 설정 마법사 실행 (exe)'
+} elseif (Test-Path $settings) {
     Start-Process powershell.exe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
         '-File', "`"$settings`"", '-FirstRun')
     Write-Output 'LiteWin 설정 마법사 실행'

@@ -73,10 +73,8 @@ $script:OfflineRegTweaks += @(
     # 제어판: 큰 아이콘으로 모든 항목 바로 보기
     @{ Hive='NTUSER'; Path='Software\Microsoft\Windows\CurrentVersion\Explorer\ControlPanel'; Name='AllItemsIconView'; Type='DWord'; Value=0 }
     @{ Hive='NTUSER'; Path='Software\Microsoft\Windows\CurrentVersion\Explorer\ControlPanel'; Name='StartupPage'; Type='DWord'; Value=1 }
-    # 작업표시줄 기본: 왼쪽 정렬, 단추 결합 안 함(이름 표시) — RetroBar 를 끈 경우에도 클래식에 가깝게
+    # 작업표시줄 기본: 왼쪽 정렬, 단추는 아이콘만(펼쳐 보기는 LiteWin 설정의 옵션)
     @{ Hive='NTUSER'; Path='Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name='TaskbarAl'; Type='DWord'; Value=0 }
-    @{ Hive='NTUSER'; Path='Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name='TaskbarGlomLevel'; Type='DWord'; Value=2 }
-    @{ Hive='NTUSER'; Path='Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name='MMTaskbarGlomLevel'; Type='DWord'; Value=2 }
     @{ Hive='NTUSER'; Path='Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name='Start_TrackDocs'; Type='DWord'; Value=1 }
     # 설정 앱 '홈'(추천/계정 홍보) 페이지 숨김
     @{ Hive='SOFTWARE'; Path='Microsoft\Windows\CurrentVersion\Policies\Explorer'; Name='SettingsPageVisibility'; Type='String'; Value='hide:home' }

@@ -64,7 +64,9 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'   # DISM cmdlet 진행표시줄이 매우 느려서 끔
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'OfflineTweaks.ps1')
+. (Join-Path $PSScriptRoot 'OfflineEdge.ps1')
 . (Join-Path $RepoRoot 'lib\LiteWin.Common.ps1')
+. (Join-Path $RepoRoot 'lib\LiteWin.Assoc.ps1')
 $ChromeMsiUrl = 'https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise64.msi'
 
 # 설치 이미지에 미리 넣을 프로그램 (winget download = 매니페스트의 SHA-256 으로 검증된 공식 설치 파일)
@@ -332,6 +334,12 @@ try {
                 Remove-ItemProperty -LiteralPath $p -Name $v.Name -Force; Info "- 값 삭제: $($v.Path)\$($v.Name)"
             }
         }
+        if ($cfg.RemoveEdge) {
+            Step 'Edge 브라우저를 설치 이미지에서 제거 (WebView2 유지)'
+            $er = Remove-EdgeFromImage -MountDir $mountDir -HivePath ${function:HivePath}
+            foreach ($x in $er.Removed) { Info "- $x" }
+            Info "'연결 프로그램' 목록에서 Edge 항목 $($er.OpenWithCleaned)개 제거"
+        }
         # 맥 스타일 포인터 값은 여기서 넣지 않는다: 첫 로그인 마법사에서 고르고,
         # '라이트 윈도우' 로 되돌릴 때 원래 Windows 값을 복원할 수 있어야 하기 때문.
     } finally {
@@ -348,28 +356,13 @@ try {
         Copy-Item (Join-Path $RepoRoot $d) $lw -Recurse -Force
     }
     $cfg | ConvertTo-Json -Depth 5 | Out-File (Join-Path $lw 'profile.json') -Encoding utf8
-    @{ RemoveEdge = $cfg.RemoveEdge; EdgeRedirect = $cfg.RemoveEdge } | ConvertTo-Json |
+    @{ RemoveEdge = $cfg.RemoveEdge; EdgeRedirect = $cfg.RemoveEdge; BrowserName = 'Google Chrome' } | ConvertTo-Json |
         Out-File (Join-Path $lw 'machine.json') -Encoding utf8
 
     # LiteWin 자체 프로그램 컴파일 (.NET Framework 내장 컴파일러, 외부 도구 불필요)
-    #   LiteWinEdgeRedirect.exe : Edge 전용 링크 → Chrome (상주 안 함)
-    #   LiteWinCaption.exe      : 모든 창에 맥식 창 버튼 (맥 UI 모드에서만 실행)
-    foreach ($tool in @(
-        @{ Src = 'shell\EdgeRedirect.cs';   Out = 'LiteWinEdgeRedirect.exe'; Refs = @() }
-        @{ Src = 'shell\LiteWinCaption.cs'; Out = 'LiteWinCaption.exe';      Refs = @('System.Windows.Forms', 'System.Drawing') }
-    )) {
-        try {
-            $tArgs = @{
-                TypeDefinition = (Get-Content (Join-Path $RepoRoot $tool.Src) -Raw -Encoding UTF8)
-                OutputAssembly = (Join-Path $lw "bin\$($tool.Out)")
-                OutputType     = 'WindowsApplication'
-                IgnoreWarnings = $true
-            }
-            if ($tool.Refs.Count) { $tArgs.ReferencedAssemblies = $tool.Refs }
-            Add-Type @tArgs
-            Info "$($tool.Out) 컴파일"
-        } catch { Warn "$($tool.Out) 컴파일 실패 — 이 기능 없이 진행: $($_.Exception.Message)" }
-    }
+    Step 'LiteWin 프로그램 컴파일 (설정 실행 파일, 창 버튼, Edge 링크 리다이렉트)'
+    $toolFail = & (Join-Path $PSScriptRoot 'Compile-LiteWinTools.ps1') -OutDir (Join-Path $lw 'bin')
+    if (@($toolFail).Count) { Warn ("컴파일 실패: " + ($toolFail -join ', ') + " — 해당 기능 없이 진행") }
 
     # 미리 넣는 프로그램 (MPC-BE, ImageGlass, RetroBar, Open-Shell, AutoHotkey)
     Step '내장 프로그램 설치 파일 받기 (winget, 해시 검증)'
@@ -402,8 +395,11 @@ try {
 
     if ($cfg.IncludeChrome) {
         Copy-Item $chromeMsi (Join-Path $lw 'payload\chrome.msi') -Force
-        Step '기본 앱: Chrome (DISM 기본 앱 연결)'
-        & dism.exe /English /Image:$mountDir "/Import-DefaultAppAssociations:$(Join-Path $RepoRoot 'unattend\DefaultAppAssociations.xml')" | Out-Null
+        Step '기본 앱: Edge 항목 → Chrome (Windows 기본 연결 파일 병합)'
+        $oem = Join-Path $mountDir 'Windows\System32\OEMDefaultAssociations.xml'
+        $merged = Join-Path $tmpDir 'DefaultAssociations.xml'
+        Merge-DefaultAssociations -Source $oem -Output $merged -Browser @('ChromeHTML', 'Google Chrome')
+        & dism.exe /English /Image:$mountDir "/Import-DefaultAppAssociations:$merged" | Out-Null
         if ($LASTEXITCODE -ne 0) { Warn "기본 앱 연결 가져오기 실패 (dism $LASTEXITCODE)" }
         # 작업표시줄 고정: 탐색기 + Chrome (Edge/Store 고정 제거)
         $shell = Join-Path $mountDir 'Users\Default\AppData\Local\Microsoft\Windows\Shell'
@@ -415,8 +411,12 @@ try {
     $lnkPath = Join-Path $mountDir 'ProgramData\Microsoft\Windows\Start Menu\Programs\LiteWin 설정.lnk'
     $wsh = New-Object -ComObject WScript.Shell
     $lnk = $wsh.CreateShortcut($lnkPath)
-    $lnk.TargetPath  = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
-    $lnk.Arguments   = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\ProgramData\LiteWin\app\LiteWinSettings.ps1"'
+    if (Test-Path (Join-Path $lw 'bin\LiteWinSettings.exe')) {
+        $lnk.TargetPath = 'C:\ProgramData\LiteWin\bin\LiteWinSettings.exe'     # 콘솔 창 없이 바로 열림
+    } else {
+        $lnk.TargetPath = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+        $lnk.Arguments  = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\ProgramData\LiteWin\app\LiteWinSettings.ps1"'
+    }
     $lnk.IconLocation = 'C:\Windows\System32\imageres.dll,109'
     $lnk.Description = '모드(라이트/맥 입력/맥 UI), 추가 앱, 브라우저 설정'
     $lnk.Save()

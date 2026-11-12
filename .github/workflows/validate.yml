@@ -27,10 +27,21 @@ jobs:
       - name: Compile C# tools (.NET Framework, same as build)
         shell: powershell
         run: |
-          $out = Join-Path $env:RUNNER_TEMP 'bin'; New-Item -ItemType Directory $out -Force | Out-Null
-          Add-Type -TypeDefinition (Get-Content shell\EdgeRedirect.cs -Raw -Encoding UTF8) -OutputAssembly "$out\LiteWinEdgeRedirect.exe" -OutputType WindowsApplication -IgnoreWarnings
-          Add-Type -TypeDefinition (Get-Content shell\LiteWinCaption.cs -Raw -Encoding UTF8) -OutputAssembly "$out\LiteWinCaption.exe" -OutputType WindowsApplication -ReferencedAssemblies System.Windows.Forms, System.Drawing -IgnoreWarnings
+          $out = Join-Path $env:RUNNER_TEMP 'bin'
+          $fail = & .\build\Compile-LiteWinTools.ps1 -OutDir $out
           Get-ChildItem $out
+          if (@($fail).Count) { Write-Host "::error::compile failed: $($fail -join ', ')"; exit 1 }
+
+      - name: Merge default associations (offline logic)
+        shell: powershell
+        run: |
+          . .\lib\LiteWin.Assoc.ps1
+          $out = Join-Path $env:RUNNER_TEMP 'assoc.xml'
+          Merge-DefaultAssociations -Source "$env:WINDIR\System32\OEMDefaultAssociations.xml" -Output $out -Browser @('ChromeHTML', 'Google Chrome') -Entries ([ordered]@{ '.mp4' = @('mpc-be.mp4', 'MPC-BE') })
+          $x = [xml](Get-Content $out -Raw)
+          $edge = @($x.DefaultAssociations.Association | Where-Object { $_.ProgId -like 'MSEdge*' })
+          Write-Host "associations: $(@($x.DefaultAssociations.Association).Count), edge left: $($edge.Count)"
+          if ($edge.Count) { exit 1 }
 
       - name: Validate AutoHotkey script
         shell: powershell

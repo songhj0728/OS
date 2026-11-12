@@ -107,9 +107,6 @@ function Find-ProgId([string]$ext, [string]$pattern) {
     return $null
 }
 $assoc = [ordered]@{}
-if (Test-Path "$env:ProgramFiles\Google\Chrome\Application\chrome.exe") {
-    foreach ($e in 'http', 'https', '.htm', '.html', '.shtml', '.xht', '.xhtml', '.svg', '.pdf') { $assoc[$e] = @('ChromeHTML', 'Google Chrome') }
-}
 foreach ($e in '.mp4', '.m4v', '.mkv', '.mov', '.avi', '.wmv', '.webm', '.ts', '.m2ts', '.mts', '.hevc', '.h265', '.265', '.flv', '.3gp', '.mpg', '.mpeg') {
     $id = Find-ProgId $e 'mpc'
     if ($id) { $assoc[$e] = @($id, 'MPC-BE') }
@@ -118,29 +115,29 @@ foreach ($e in '.heic', '.heif', '.avif') {
     $id = Find-ProgId $e 'ImageGlass'
     if ($id) { $assoc[$e] = @($id, 'ImageGlass') }
 }
-if ($assoc.Count) {
+$browser = $null
+if (Test-Path "$env:ProgramFiles\Google\Chrome\Application\chrome.exe") { $browser = @('ChromeHTML', 'Google Chrome') }
+try {
+    # Windows 기본 연결 파일과 '병합'해서 가져온다 (전체 교체라 일부만 넣으면 다른 기본값이 사라짐)
+    . (Join-Path $root 'lib\LiteWin.Assoc.ps1')
     $xmlPath = Join-Path $root 'DefaultAssociations.xml'
-    $lines = foreach ($k in $assoc.Keys) {
-        '  <Association Identifier="{0}" ProgId="{1}" ApplicationName="{2}" />' -f $k, [Security.SecurityElement]::Escape($assoc[$k][0]), $assoc[$k][1]
-    }
-    @('<?xml version="1.0" encoding="UTF-8"?>', '<DefaultAssociations>') + $lines + '</DefaultAssociations>' |
-        Set-Content $xmlPath -Encoding UTF8
+    Merge-DefaultAssociations -Source "$env:WINDIR\System32\OEMDefaultAssociations.xml" -Output $xmlPath -Entries $assoc -Browser $browser
     & dism.exe /Online /English "/Import-DefaultAppAssociations:$xmlPath" | Out-Null
-    Log "기본 앱 연결 $($assoc.Count)개 적용 (dism 코드 $LASTEXITCODE)"
-}
+    Log "기본 앱 연결 병합: 추가 $($assoc.Count)개 + 브라우저 (dism 코드 $LASTEXITCODE)"
+} catch { Log "기본 앱 연결 실패: $_" }
 
 # ---------------------------------------------------------------- Edge 제거 (WebView2 유지) + 링크 리다이렉트
+# Edge 는 이미 설치 이미지 단계에서 빠져 있다. 여기서는 남은 흔적 정리 + 재설치 감시만.
 if ($p.RemoveEdge) {
-    if (-not $chromeOk -and -not (Test-Path "$env:ProgramFiles\Google\Chrome\Application\chrome.exe")) {
-        Log 'Chrome 이 설치되지 않아 Edge 제거를 건너뜀 (브라우저가 하나도 없게 되는 것 방지)'
-        @{ RemoveEdge = $false; EdgeRedirect = $false } | ConvertTo-Json | Set-Content (Join-Path $root 'machine.json') -Encoding UTF8
-    } else {
-        try {
-            . (Join-Path $root 'lib\LiteWin.Edge.ps1')
-            [void](Remove-EdgeBrowser)
-            Register-EdgeRedirect
-            Register-EdgeGuardTask
-        } catch { Log "Edge 처리 실패: $_" }
+    try {
+        . (Join-Path $root 'lib\LiteWin.Edge.ps1')
+        [void](Remove-EdgeBrowser)
+        Register-EdgeRedirect
+        Register-EdgeGuardTask
+    } catch { Log "Edge 처리 실패: $_" }
+    if (-not (Test-Path "$env:ProgramFiles\Google\Chrome\Application\chrome.exe")) {
+        # 브라우저가 하나도 없는 상태 → 첫 로그인 후 인터넷으로 Chrome 설치 (Apply-LiteWin.ps1)
+        Log 'Chrome 설치 실패 — 첫 로그인 후 winget 으로 다시 설치합니다'
     }
 }
 

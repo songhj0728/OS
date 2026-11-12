@@ -36,6 +36,10 @@
         'Microsoft.ZuneVideo'              # 영화 및 TV (미디어 플레이어로 대체)
         'Microsoft.MicrosoftEdge.Stable'   # Edge 브라우저 패키지 (본체는 설치 후 제거, WebView2 유지)
         'Microsoft.XboxIdentityProvider'
+        'MicrosoftWindows.Client.WebExperience'   # 위젯 보드
+        'Microsoft.WidgetsPlatformRuntime'
+        'Microsoft.StartExperiencesApp'            # 시작 메뉴 휴대폰 연결/추천
+        'MicrosoftWindows.CrossDevice'
         'Microsoft.MicrosoftJournal'
         'Microsoft.Office.Sway'
         'microsoft.windowscommunicationsapps' # 메일/일정

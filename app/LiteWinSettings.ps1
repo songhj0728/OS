@@ -114,6 +114,7 @@ $rbMac  = Add-Radio $p1 '맥 입력' ($curMode -eq 'MacInput')
 [void](Add-Label $p1 '    왼쪽 Alt = ⌘, 왼쪽 Win = ⌥, Caps Lock = 한/영, 맥 F열, 마우스 가속, 트랙패드 제스처. 화면은 클래식 구조' $small $gray)
 $shBar   = Add-Check $p1 '클래식 작업표시줄 (Win7 이전 구조, RetroBar)' ([bool](Get-ShellOpt 'ClassicTaskbar' $true)) 24
 $shStart = Add-Check $p1 'Win7 시작 메뉴 (Open-Shell)' ([bool](Get-ShellOpt 'ClassicStart' $true)) 24
+$shLabels = Add-Check $p1 '작업표시줄 단추 펼쳐 보기 (프로그램 이름 표시, 묶지 않기)' ([bool](Get-ShellOpt 'TaskbarLabels' $false)) 24
 $rbUi   = Add-Radio $p1 '맥 입력 + UI 스타일' ($curMode -eq 'MacUI')
 [void](Add-Label $p1 '    맥 입력 + Dock(가운데 작업표시줄) + 아래에서 고른 화면 스타일' $small $gray)
 
@@ -135,7 +136,7 @@ $p1.Controls.Add($cbCaption)
 function Update-UiEnabled {
     foreach ($cb in $uiChecks.Values) { $cb.Enabled = $rbUi.Checked }
     $cbCaption.Enabled = $rbUi.Checked
-    $shBar.Enabled = -not $rbUi.Checked; $shStart.Enabled = -not $rbUi.Checked
+    $shBar.Enabled = -not $rbUi.Checked; $shStart.Enabled = -not $rbUi.Checked; $shLabels.Enabled = -not $rbUi.Checked
 }
 $rbUi.add_CheckedChanged({ Update-UiEnabled }); Update-UiEnabled
 
@@ -156,7 +157,9 @@ $p2 = New-Page '사진·동영상'
 [void](Add-Label $p2 '동영상(HEVC 포함)은 MPC-BE, 아이폰 사진(.heic)은 ImageGlass 로 바로 열리도록 이미 설치되어 있습니다. 그 밖의 사진은 Windows 사진 앱. 탐색기 미리보기·사진 앱에서도 VP9/AV1/RAW 등을 보려면 아래 코덱 팩을 고르세요.')
 Add-CatalogSection $p2 'media'
 
-# ============================================================== 탭 3: 게임
+# ============================================================== 탭 3: 게임 (Gaming 프로필에서만)
+$isGaming = "$($lwProfile.Name)" -eq 'Gaming'
+if ($isGaming) {
 $p3 = New-Page '게임'
 [void](Add-Label $p3 '설치할 게임 플랫폼을 고르세요. 너무 많으면 비워두거나 [모두 해제] 를 누르세요.')
 $tpm = Test-TpmSecureBoot
@@ -175,11 +178,13 @@ $btnNone.add_Click({
         foreach ($a in @($catalog.apps | Where-Object category -eq $cat)) { $appChecks[$a.id].Checked = $false }
     }
 })
+}
 
 # ============================================================== 탭 4: 브라우저
 $p4 = New-Page '브라우저'
-[void](Add-Label $p4 '기본 브라우저: Google Chrome' $bold)
-[void](Add-Label $p4 '설치 시 Chrome 이 기본 브라우저로 지정됩니다. 다른 브라우저를 쓰려면 설치 후 설정 > 앱 > 기본 앱 에서 바꾸세요.' $small $gray)
+$browserName = if ($machine -and $machine.BrowserName) { $machine.BrowserName } else { 'Google Chrome' }
+[void](Add-Label $p4 "기본 브라우저: $browserName" $bold)
+[void](Add-Label $p4 'Edge 는 설치 이미지 단계에서 빠져 있고, 웹/HTML/PDF/XML 은 이 브라우저로 열립니다. 바꾸려면 설정 > 앱 > 기본 앱.' $small $gray)
 $removeEdge = if ($machine) { [bool]$machine.RemoveEdge } else { $true }
 $redirect   = if ($machine) { [bool]$machine.EdgeRedirect } else { $true }
 $cbEdge  = Add-Check $p4 'Edge 브라우저 제거 (WebView2 런타임은 유지)' $removeEdge
@@ -215,7 +220,7 @@ function Start-Apply([bool]$installApps) {
         NaturalMouseWheel = $kbWheel.Checked
         Keys = @{ CapsLockToHangul = $kbCaps.Checked; OptionWordMove = $kbWord.Checked; CmdQuitApp = $kbQuit.Checked
                   MacFKeys = $kbF.Checked; StandardFKeys = $kbStdF.Checked; GameAutoOff = $kbGame.Checked }
-        Shell = @{ ClassicTaskbar = $shBar.Checked; ClassicStart = $shStart.Checked
+        Shell = @{ ClassicTaskbar = $shBar.Checked; ClassicStart = $shStart.Checked; TaskbarLabels = $shLabels.Checked
                    Caption = @('off', 'traffic', 'fullscreen')[$cbCaption.SelectedIndex] }
         RemoveEdge = $cbEdge.Checked; EdgeRedirect = $cbRedir.Checked
     }
