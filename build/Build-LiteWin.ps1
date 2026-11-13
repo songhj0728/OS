@@ -81,7 +81,6 @@ $ChromeMsiUrl = 'https://dl.google.com/dl/chrome/install/googlechromestandalonee
 # 설치 이미지에 미리 넣을 프로그램 (winget download = 매니페스트의 SHA-256 으로 검증된 공식 설치 파일)
 #   설치 마지막 단계(SetupComplete)에서 인터넷 없이 무인 설치된다. Args 를 비우면 매니페스트의 설치 종류로 판단.
 $Payloads = @(
-    @{ Name = 'autohotkey'; Id = 'AutoHotkey.AutoHotkey';       Args = '' }                         # 맥 입력
     # Repo/Pattern: winget download 가 실패하면 GitHub 공식 릴리스에서 받는다. FallbackArgs: 그때 쓸 무인 설치 옵션
     @{ Name = 'mpc-be';     Id = 'MPC-BE.MPC-BE';               Args = ''; Repo = 'Aleksoid1978/MPC-BE'; Pattern = 'x64.*installer.*\.(zip|exe)$'; FallbackArgs = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-' }
     @{ Name = 'imageglass'; Id = 'DuongDieuPhap.ImageGlass';    Args = ''; Repo = 'd2phap/ImageGlass';   Pattern = 'x64\.msi$' }
@@ -588,7 +587,7 @@ SCRNSAVE.EXE=
     ConvertTo-Json -InputObject @($script:OfflineRegTweaks | Where-Object { $_.Hive -ne 'NTUSER' }) -Depth 3 |
         Out-File (Join-Path $lw 'policies.json') -Encoding utf8
     $cfg | ConvertTo-Json -Depth 5 | Out-File (Join-Path $lw 'profile.json') -Encoding utf8
-    @{ RemoveEdge = $cfg.RemoveEdge; EdgeRedirect = $cfg.RemoveEdge; BrowserName = 'Google Chrome' } | ConvertTo-Json |
+    @{ RemoveEdge = $cfg.RemoveEdge; EdgeRedirect = $cfg.RemoveEdge; BrowserName = 'Google Chrome'; DefaultBrowser = 'chrome' } | ConvertTo-Json |
         Out-File (Join-Path $lw 'machine.json') -Encoding utf8
 
     # LiteWin 자체 프로그램 컴파일 (.NET Framework 내장 컴파일러, 외부 도구 불필요)
@@ -606,9 +605,24 @@ SCRNSAVE.EXE=
     }
     if ($toolFail.Count) { Warn ("컴파일 실패: " + ($toolFail -join ', ') + " — 해당 기능 없이 진행") }
 
-    # 미리 넣는 프로그램 (MPC-BE, ImageGlass, RetroBar, Open-Shell, AutoHotkey)
+    # 미리 넣는 프로그램 (MPC-BE, ImageGlass, RetroBar, Open-Shell, .NET 런타임)
     Step '내장 프로그램 설치 파일 받기 (winget, 해시 검증)'
     $payloadList = @(Save-WingetPayloads -Dest (Join-Path $lw 'payload'))
+    # 맥 입력용 키 매핑 엔진(AutoHotkey v2 공식 zip) — 설치하지 않고 넣어만 둔다. '맥 입력'을 켤 때만 꺼내 쓴다.
+    try {
+        $ahkCached = Join-Path $dlCache 'autohotkey.zip'
+        $ahkFile = Join-Path $lw 'payload\autohotkey.zip'
+        if ($Fast -and (Test-FreshFile $ahkCached)) { Copy-Item $ahkCached $ahkFile -Force; Info 'autohotkey: 캐시 사용' }
+        else {
+            $ahkRel = Get-GitHubRelease -Repo 'AutoHotkey/AutoHotkey' -AssetPattern '^AutoHotkey_2.*\.zip$' -DelayDays 7
+            if ($ahkRel) {
+                [void](Save-VerifiedAsset -Release $ahkRel -OutFile $ahkFile -AllowUnverified)
+                if ($Fast) { Copy-Item $ahkFile $ahkCached -Force }
+                Info "autohotkey: $($ahkRel.Tag) (맥 입력을 켤 때만 사용)"
+            }
+        }
+    } catch { Warn "AutoHotkey 받기 실패 — 맥 입력을 켤 때 인터넷으로 받음: $($_.Exception.Message)" }
+
     # ExplorerPatcher (Win10 클래식 작업표시줄) — GitHub 공식 릴리스, 배포 후 7일 지난 버전, SHA-256 확인
     try {
         $epCached = Join-Path $dlCache 'ep_setup.exe'

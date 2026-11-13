@@ -112,41 +112,41 @@ function Set-NaturalMouseWheel {
 }
 
 # ---------------------------------------------------------------------------
-# 키보드 (AutoHotkey v2 + MacKeys.ahk)
+# 키보드 (LiteWinKeys.exe = AutoHotkey v2 엔진 + MacKeys.ahk)
 # ---------------------------------------------------------------------------
+# 키 매핑 엔진: AutoHotkey v2 의 실행 파일 하나만 LiteWinKeys.exe 로 넣는다.
+#   설치 프로그램을 쓰지 않으므로 시작 메뉴(Window Spy, Dash 등)·앱 목록·트레이 아이콘이 생기지 않는다.
+#   '맥 입력'을 켤 때만 준비되고, 끄면 실행되지 않는다(라이트 모드에서는 아무것도 상주하지 않음).
+$script:KeysExe = Join-Path $script:LWRoot 'bin\LiteWinKeys.exe'
+
 function Find-AutoHotkey {
-    foreach ($c in "$env:ProgramFiles\AutoHotkey\v2\AutoHotkey64.exe",
-                   "$env:LOCALAPPDATA\Programs\AutoHotkey\v2\AutoHotkey64.exe",
-                   "$env:ProgramFiles\AutoHotkey-v2\AutoHotkey64.exe",
-                   "$env:ProgramFiles\AutoHotkey-v2\v2\AutoHotkey64.exe") {
-        if (Test-Path $c) { return $c }
-    }
+    if (Test-Path $script:KeysExe) { return $script:KeysExe }
     return $null
 }
 
 function Install-AutoHotkey {
     $exe = Find-AutoHotkey
     if ($exe) { return $exe }
-    if (Invoke-Winget -Id 'AutoHotkey.AutoHotkey' -Scope machine) {
-        $exe = Find-AutoHotkey
-        if ($exe) { return $exe }
+    New-Item -ItemType Directory -Path (Split-Path $script:KeysExe) -Force | Out-Null
+    $zip = Join-Path $script:LWRoot 'payload\autohotkey.zip'          # 설치 이미지에 넣어 둔 공식 zip (인터넷 없이 사용)
+    if (-not (Test-Path $zip)) {
+        # 없으면 GitHub 공식 릴리스(AutoHotkey/AutoHotkey)에서 받는다 (autohotkey.com 은 스크립트 다운로드를 봇 차단)
+        . (Join-Path $PSScriptRoot '..\lib\LiteWin.Components.ps1')
+        $rel = Get-GitHubRelease -Repo 'AutoHotkey/AutoHotkey' -AssetPattern '^AutoHotkey_2.*\.zip$' -DelayDays 0
+        if (-not $rel) { return $null }
+        $zip = Join-Path $env:TEMP 'litewin-ahk.zip'
+        [void](Save-VerifiedAsset -Release $rel -OutFile $zip -AllowUnverified)
     }
-    # autohotkey.com 은 스크립트 다운로드를 봇 차단하므로 GitHub 공식 릴리스(AutoHotkey/AutoHotkey)에서 받는다
-    Write-LWLog 'winget 실패 → AutoHotkey GitHub 공식 릴리스 zip 으로 설치' WARN
-    $zip  = Join-Path $env:TEMP 'ahk-v2.zip'
-    $dest = "$env:ProgramFiles\AutoHotkey-v2"
-    $rel = Invoke-RestMethod -UseBasicParsing -Headers @{ 'User-Agent' = 'LiteWin' } -Uri 'https://api.github.com/repos/AutoHotkey/AutoHotkey/releases/latest'
-    $asset = $rel.assets | Where-Object name -like 'AutoHotkey_2*.zip' | Select-Object -First 1
-    if (-not $asset) { return $null }
-    Invoke-WebRequest -UseBasicParsing -Uri $asset.browser_download_url -OutFile $zip
-    Expand-Archive -Path $zip -DestinationPath $dest -Force
-    Remove-Item $zip -Force
-    $exe = Find-AutoHotkey
-    if ($exe) {
-        $sig = Get-AuthenticodeSignature $exe
-        if ($sig.Status -ne 'Valid') { Write-LWLog "AutoHotkey 서명 확인 실패($($sig.Status)) — 삭제" ERROR; Remove-Item $dest -Recurse -Force; return $null }
+    $x = Join-Path $env:TEMP ('litewin-ahk-' + [guid]::NewGuid().ToString('N'))
+    Expand-Archive -Path $zip -DestinationPath $x -Force
+    $src = Get-ChildItem $x -Recurse -Filter 'AutoHotkey64.exe' | Select-Object -First 1
+    if ($src) {
+        $sig = Get-AuthenticodeSignature $src.FullName
+        if ($sig.Status -eq 'HashMismatch') { Write-LWLog 'AutoHotkey 실행 파일 서명 손상 — 사용하지 않음' ERROR }
+        else { Copy-Item $src.FullName $script:KeysExe -Force }
     }
-    return $exe
+    Remove-Item $x -Recurse -Force -ErrorAction SilentlyContinue
+    return (Find-AutoHotkey)
 }
 
 function Get-MacKeysTaskName { "LiteWin MacKeys ($env:USERNAME)" }
@@ -180,7 +180,7 @@ Spotlight=$Spotlight
 function Enable-MacKeys {
     <# AHK 설치 → 로그인 시 관리자 권한 자동 실행 작업 등록 → 즉시 시작 #>
     $ahk = Install-AutoHotkey
-    if (-not $ahk) { throw 'AutoHotkey 설치 실패 (인터넷 연결 확인)' }
+    if (-not $ahk) { throw '키 매핑 엔진 준비 실패 (설치 이미지에 없고 인터넷으로도 받지 못함)' }
     $script = Join-Path $script:LWRoot 'macstyle\MacKeys.ahk'
     if (-not (Test-Path $script)) { $script = Join-Path $PSScriptRoot 'MacKeys.ahk' }
     if (-not (Test-Path (Join-Path $script:LWUserDir 'MacKeys.ini'))) { Set-MacKeysConfig }
@@ -199,7 +199,7 @@ function Enable-MacKeys {
 }
 
 function Stop-MacKeysProcess {
-    Get-CimInstance Win32_Process -Filter "Name LIKE 'AutoHotkey%'" -ErrorAction SilentlyContinue |
+    Get-CimInstance Win32_Process -Filter "Name LIKE 'LiteWinKeys%' OR Name LIKE 'AutoHotkey%'" -ErrorAction SilentlyContinue |
         Where-Object { $_.CommandLine -like '*MacKeys.ahk*' } |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }
@@ -214,4 +214,8 @@ function Disable-MacKeys {
 function Remove-MacKeys {
     Unregister-ScheduledTask -TaskName (Get-MacKeysTaskName) -TaskPath '\LiteWin\' -Confirm:$false -ErrorAction SilentlyContinue
     Stop-MacKeysProcess
+    # 다른 사용자가 맥 입력을 쓰지 않으면 엔진 파일도 지운다
+    if (-not (Get-ScheduledTask -TaskPath '\LiteWin\' -TaskName 'LiteWin MacKeys*' -ErrorAction SilentlyContinue)) {
+        Remove-Item $script:KeysExe -Force -ErrorAction SilentlyContinue
+    }
 }

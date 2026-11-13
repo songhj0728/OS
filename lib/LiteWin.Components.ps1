@@ -12,9 +12,9 @@ $script:ComponentsFile = Join-Path $script:LWRoot 'components.json'
 $script:EPRepo = 'valinet/ExplorerPatcher'
 $script:EPAsset = 'ep_setup.exe'
 # winget 으로 관리하는 셸 구성요소 (winget 저장소는 검토 후 등록 + 해시 검증)
-$script:WingetComponents = @('dremin.RetroBar', 'Open-Shell.Open-Shell-Menu', 'AutoHotkey.AutoHotkey', 'MPC-BE.MPC-BE', 'DuongDieuPhap.ImageGlass')
+$script:WingetComponents = @('dremin.RetroBar', 'Open-Shell.Open-Shell-Menu', 'MPC-BE.MPC-BE', 'DuongDieuPhap.ImageGlass')
 # 설정 > 앱 에서 숨길 셸 구성요소 (사용자용 앱인 MPC-BE/ImageGlass/Chrome 은 숨기지 않음)
-$script:HiddenComponents = @('ExplorerPatcher*', 'RetroBar*', 'Open-Shell*', 'AutoHotkey*')
+$script:HiddenComponents = @('ExplorerPatcher*', 'RetroBar*', 'Open-Shell*', 'AutoHotkey*')   # AutoHotkey: 예전 빌드에서 설치된 경우 숨김
 
 function Get-LWComponentState {
     $d = [ordered]@{ AutoUpdate = $true; DelayDays = 7; EpSuspended = $false; EpSuspendedBuild = ''; EpSuspendedAt = ''; PendingEpUpdate = ''; History = @() }

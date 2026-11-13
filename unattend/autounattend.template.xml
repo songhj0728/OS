@@ -48,8 +48,27 @@
         <HideEULAPage>true</HideEULAPage>
         <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
         <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+        <HideLocalAccountScreen>true</HideLocalAccountScreen>
         <ProtectYourPC>3</ProtectYourPC>
       </OOBE>
+      <!-- 계정: 'user'(관리자 그룹, 암호 없음)를 만들고 처음 한 번 자동 로그인한다.
+           이름/암호는 첫 로그인 마법사(계정 탭)에서 정한다. 비워 두면 그대로 'user'. -->
+      <UserAccounts>
+        <LocalAccounts>
+          <LocalAccount wcm:action="add">
+            <Name>user</Name>
+            <Group>Administrators</Group>
+            <DisplayName>user</DisplayName>
+            <Password><Value></Value><PlainText>true</PlainText></Password>
+          </LocalAccount>
+        </LocalAccounts>
+      </UserAccounts>
+      <AutoLogon>
+        <Enabled>true</Enabled>
+        <LogonCount>1</LogonCount>
+        <Username>user</Username>
+        <Password><Value></Value><PlainText>true</PlainText></Password>
+      </AutoLogon>
       <FirstLogonCommands>
         <SynchronousCommand wcm:action="add">
           <Order>1</Order>

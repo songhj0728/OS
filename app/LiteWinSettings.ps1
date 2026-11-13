@@ -13,6 +13,7 @@ $root = Split-Path -Parent $PSScriptRoot
 . (Join-Path $root 'lib\LiteWin.Common.ps1')
 . (Join-Path $root 'lib\LiteWin.Apps.ps1')
 . (Join-Path $root 'lib\LiteWin.Components.ps1')
+. (Join-Path $root 'lib\LiteWin.Browsers.ps1')
 
 # 관리자 권한으로 다시 실행
 if (-not (Test-LWAdmin)) {
@@ -106,6 +107,76 @@ function Add-CatalogSection($panel, [string]$categoryId, [int]$indent = 0) {
     }
 }
 
+# ============================================================== 탭 0: 계정 (첫 실행에서만)
+$acct = $null
+if ($FirstRun) {
+    $p0 = New-Page '계정'
+    [void](Add-Label $p0 '이 PC 에서 쓸 이름을 정하세요. 비워 두면 "user" 로 만듭니다.' $bold)
+    function New-TextRow($panel, [string]$label, [switch]$Password) {
+        $row = New-Object Windows.Forms.FlowLayoutPanel; $row.AutoSize = $true; $row.WrapContents = $false
+        $row.Margin = New-Object Windows.Forms.Padding(12, 4, 3, 2)
+        $l = New-Object Windows.Forms.Label; $l.Text = $label; $l.Width = 130; $l.Margin = New-Object Windows.Forms.Padding(0, 6, 3, 0)
+        $t = New-Object Windows.Forms.TextBox; $t.Width = 220; if ($Password) { $t.UseSystemPasswordChar = $true }
+        $row.Controls.AddRange(@($l, $t)); $panel.Controls.Add($row); return $t
+    }
+    $txtName  = New-TextRow $p0 '사용자 이름'
+    $txtPw    = New-TextRow $p0 '암호 (선택)' -Password
+    $txtPw2   = New-TextRow $p0 '암호 확인' -Password
+    [void](Add-Label $p0 '    암호를 비워 두면 암호 없이 로그인합니다. 다른 사람이 쓰는 PC 라면 암호를 정하세요.' $small $gray)
+
+    [void](Add-Label $p0 '고급' $bold $null 14)
+    $cbAdmin = Add-Check $p0 '기본 제공 Administrator 계정도 사용' $false 12
+    [void](Add-Label $p0 '    Windows 에 숨겨져 있는 최고 권한 계정을 켭니다. 일반적인 사용에는 필요 없습니다.' $small $gray)
+    $txtAdm  = New-TextRow $p0 'Administrator 암호' -Password
+    $txtAdm2 = New-TextRow $p0 '암호 확인' -Password
+    $txtAdm.Enabled = $false; $txtAdm2.Enabled = $false
+    $script:adminConfirmed = $false
+    $cbAdmin.add_CheckedChanged({
+        if ($cbAdmin.Checked -and -not $script:adminConfirmed) {
+            $m1 = "기본 제공 Administrator 계정은 사용자 계정 컨트롤(UAC) 확인 없이 모든 프로그램이 최고 권한으로 실행됩니다.`n`n" +
+                  "- 악성 프로그램이 확인 창 없이 시스템 전체를 바꿀 수 있습니다`n- 실수로 시스템 파일을 지워도 막아 주지 않습니다`n- 일부 Store 앱과 보안 기능이 제한될 수 있습니다`n`n계속할까요?"
+            $r1 = [Windows.Forms.MessageBox]::Show($m1, '보안 경고', 'YesNo', 'Warning', 'Button2')
+            $r2 = 'No'
+            if ($r1 -eq 'Yes') {
+                $r2 = [Windows.Forms.MessageBox]::Show("한 번 더 확인합니다.`n`nAdministrator 계정을 켜고, 반드시 암호를 정해야 합니다. 평소에는 위의 일반 계정을 쓰고, 필요할 때만 Administrator 로 로그인하는 것을 권장합니다.`n`n정말 켤까요?", '보안 경고 (2/2)', 'YesNo', 'Warning', 'Button2')
+            }
+            if ($r2 -ne 'Yes') { $cbAdmin.Checked = $false; return }
+            $script:adminConfirmed = $true
+        }
+        $txtAdm.Enabled = $cbAdmin.Checked; $txtAdm2.Enabled = $cbAdmin.Checked
+    })
+
+    function Invoke-AccountSetup {
+        <# 창에서 바로 처리한다 (암호를 파일에 남기지 않기 위해). 실패하면 $false #>
+        $name = $txtName.Text.Trim()
+        if (-not $name) { $name = 'user' }
+        if ($name.Length -gt 20 -or $name -match '["/\\\[\]:;|=,+*?<>@]') {
+            [Windows.Forms.MessageBox]::Show('이름은 20자 이하이고 " / \ [ ] : ; | = , + * ? < > @ 를 쓸 수 없습니다.', 'LiteWin') | Out-Null; return $false
+        }
+        if ($txtPw.Text -ne $txtPw2.Text) { [Windows.Forms.MessageBox]::Show('암호가 서로 다릅니다.', 'LiteWin') | Out-Null; return $false }
+        if ($cbAdmin.Checked) {
+            if (-not $txtAdm.Text) { [Windows.Forms.MessageBox]::Show('Administrator 계정에는 암호가 꼭 필요합니다.', 'LiteWin') | Out-Null; return $false }
+            if ($txtAdm.Text -ne $txtAdm2.Text) { [Windows.Forms.MessageBox]::Show('Administrator 암호가 서로 다릅니다.', 'LiteWin') | Out-Null; return $false }
+        }
+        try {
+            $me = $env:USERNAME
+            if ($name -ne $me) { Rename-LocalUser -Name $me -NewName $name -ErrorAction Stop }
+            Set-LocalUser -Name $name -FullName $name -ErrorAction SilentlyContinue
+            if ($txtPw.Text) { Set-LocalUser -Name $name -Password (ConvertTo-SecureString $txtPw.Text -AsPlainText -Force) -ErrorAction Stop }
+            if ($cbAdmin.Checked) {
+                $adm = Get-LocalUser | Where-Object { $_.SID.Value -like 'S-1-5-*-500' } | Select-Object -First 1
+                Set-LocalUser -SID $adm.SID -Password (ConvertTo-SecureString $txtAdm.Text -AsPlainText -Force) -ErrorAction Stop
+                Enable-LocalUser -SID $adm.SID -ErrorAction Stop
+                Write-LWLog "기본 제공 Administrator 계정 켬 (사용자 확인 2회)" WARN
+            }
+            Write-LWLog "계정 이름: $name (로그아웃 후 표시 반영)"
+            return $true
+        } catch {
+            [Windows.Forms.MessageBox]::Show("계정 설정 실패: $($_.Exception.Message)", 'LiteWin') | Out-Null; return $false
+        }
+    }
+}
+
 # ============================================================== 탭 1: 모드
 $p1 = New-Page '모드'
 [void](Add-Label $p1 '조작 방식과 화면 스타일을 고르세요. 언제든 이 창에서 다시 바꿀 수 있습니다.')
@@ -192,15 +263,44 @@ $btnNone.add_Click({
 
 # ============================================================== 탭 4: 브라우저
 $p4 = New-Page '브라우저'
-$browserName = if ($machine -and $machine.BrowserName) { $machine.BrowserName } else { 'Google Chrome' }
-[void](Add-Label $p4 "기본 브라우저: $browserName" $bold)
-[void](Add-Label $p4 'Edge 는 설치 이미지 단계에서 빠져 있고, 웹/HTML/PDF/XML 은 이 브라우저로 열립니다. 바꾸려면 설정 > 앱 > 기본 앱.' $small $gray)
-$removeEdge = if ($machine) { [bool]$machine.RemoveEdge } else { $true }
-$redirect   = if ($machine) { [bool]$machine.EdgeRedirect } else { $true }
-$cbEdge  = Add-Check $p4 'Edge 브라우저 제거 (WebView2 런타임은 유지)' $removeEdge
-[void](Add-Label $p4 '    해제하고 적용하면 Edge 를 다시 설치합니다' $small $gray)
-$cbRedir = Add-Check $p4 'Edge 전용 링크(microsoft-edge:)를 Chrome 으로 열기' $redirect
-$cbEdge.add_CheckedChanged({ $cbRedir.Enabled = $cbEdge.Checked }); $cbRedir.Enabled = $cbEdge.Checked
+[void](Add-Label $p4 '설치할 브라우저에 체크하고, 기본으로 쓸 브라우저를 고르세요. 체크를 해제하고 적용하면 그 브라우저를 지웁니다.')
+[void](Add-Label $p4 '    마지막 남은 브라우저는 지우지 않습니다. 기본 브라우저를 바꾸면 Windows 기본 앱 화면이 열리니 [기본값으로 설정] 을 눌러 주세요.' $small $gray)
+$installedBrowsers = @(Get-LWInstalledBrowsers)
+$curDefault = Get-LWDefaultBrowserId
+$browserRows = [ordered]@{}
+foreach ($bid in $script:LWBrowsers.Keys) {
+    $b = $script:LWBrowsers[$bid]
+    $row = New-Object Windows.Forms.FlowLayoutPanel
+    $row.AutoSize = $true; $row.WrapContents = $false; $row.Margin = New-Object Windows.Forms.Padding(12, 2, 3, 2)
+    $cbI = New-Object Windows.Forms.CheckBox
+    $cbI.Text = $b.Name + $(if ($installedBrowsers -contains $bid) { '  (설치됨)' } else { '' }); $cbI.Width = 230
+    $cbI.Checked = $installedBrowsers -contains $bid
+    $rbD = New-Object Windows.Forms.RadioButton
+    $rbD.Text = '기본'; $rbD.AutoSize = $true; $rbD.Checked = ($bid -eq $curDefault)
+    $row.Controls.AddRange(@($cbI, $rbD)); $p4.Controls.Add($row)
+    $browserRows[$bid] = @{ Install = $cbI; Default = $rbD }
+    $cbI.add_CheckedChanged({ foreach ($r in $browserRows.Values) { $r.Default.Enabled = $r.Install.Checked } }.GetNewClosure())
+}
+foreach ($r in $browserRows.Values) { $r.Default.Enabled = $r.Install.Checked }
+$redirect = if ($machine -and $null -ne $machine.EdgeRedirect) { [bool]$machine.EdgeRedirect } else { $true }
+$cbRedir = Add-Check $p4 'Edge 가 없을 때 Edge 전용 링크(microsoft-edge:)를 기본 브라우저로 열기' $redirect
+[void](Add-Label $p4 '    Edge 를 지워도 WebView2 런타임은 남겨 둡니다 (여러 앱이 화면 표시에 사용).' $small $gray)
+
+function Get-BrowserChoices {
+    $want = @(); $default = $null
+    foreach ($k in $browserRows.Keys) {
+        if ($browserRows[$k].Install.Checked) { $want += $k }
+        if ($browserRows[$k].Default.Checked -and $browserRows[$k].Install.Checked) { $default = $k }
+    }
+    if (-not $want.Count) { [Windows.Forms.MessageBox]::Show('브라우저를 하나 이상 남겨 두어야 인터넷을 쓸 수 있습니다.', 'LiteWin') | Out-Null; return $null }
+    if (-not $default) { $default = $want[0] }
+    [pscustomobject]@{
+        Install = @($want | Where-Object { $installedBrowsers -notcontains $_ -and $_ -ne 'edge' })
+        Remove  = @($installedBrowsers | Where-Object { $want -notcontains $_ -and $_ -ne 'edge' })
+        Default = $default
+        Edge    = ($want -contains 'edge')
+    }
+}
 
 # ============================================================== 탭 5: 정보 (구성요소)
 $p5 = New-Page '정보'
@@ -210,7 +310,9 @@ $epi = Get-EPInstalled
 $verLines = @(
     ('ExplorerPatcher : ' + $(if ($epi) { $epi.RawVersion } elseif ($cst.EpSuspended) { '기능 업데이트 보호 중 (업그레이드 후 자동 재설치)' } else { '없음 (RetroBar 사용)' }))
 )
-foreach ($n in 'RetroBar*', 'Open-Shell*', 'AutoHotkey*', 'MPC-BE*', 'ImageGlass*') {
+$keysExe = Join-Path $script:LWRoot 'bin\LiteWinKeys.exe'
+$verLines += ('{0,-16}: {1}' -f '맥 입력 엔진', $(if (Test-Path $keysExe) { (Get-Item $keysExe).VersionInfo.FileVersion } else { '없음 (맥 입력을 켤 때 준비)' }))
+foreach ($n in 'RetroBar*', 'Open-Shell*', 'MPC-BE*', 'ImageGlass*') {
     $e = @(Get-UninstallEntries $n) | Select-Object -First 1
     $verLines += ('{0,-16}: {1}' -f $n.TrimEnd('*'), $(if ($e) { $e.DisplayVersion } else { '없음' }))
 }
@@ -251,6 +353,18 @@ $form.Controls.AddRange(@($btnApply, $btnSkip, $btnClose))
 $form.AcceptButton = $btnApply
 
 function Start-Apply([bool]$installApps) {
+    $br = Get-BrowserChoices
+    if (-not $br) { return }
+    # 맥 입력을 새로 켤 때 한 번 알림
+    if (($rbMac.Checked -or $rbUi.Checked) -and "$($state.Mode)" -notin 'MacInput', 'MacUI') {
+        $msg = "맥 입력은 작은 키 매핑 프로그램(LiteWinKeys)이 보이지 않게 상주하며 키 입력을 바꿉니다.`n`n" +
+               "- ⌘(왼쪽 Alt) 조합과 F열이 바뀌고, 일반 키는 그대로 통과합니다`n" +
+               "- 일부 게임(특히 안티치트가 있는 게임)에서 ⌘ 조합이 막히거나, 입력 프로그램으로 감지될 수 있습니다`n" +
+               "- 로그인 화면과 보안 확인(UAC) 창에서는 동작하지 않습니다`n`n" +
+               "언제든 '라이트 윈도우'로 돌아가면 프로그램이 멈추고 원래 키 배치로 돌아갑니다. 켤까요?"
+        if ([Windows.Forms.MessageBox]::Show($msg, '맥 입력 켜기', 'YesNo', 'Information') -ne 'Yes') { return }
+    }
+    if ($acct -or $FirstRun) { if (-not (Invoke-AccountSetup)) { $tabs.SelectedIndex = 0; return } }
     try { Save-ComponentOptions } catch { }
     $mode = if ($rbUi.Checked) { 'MacUI' } elseif ($rbMac.Checked) { 'MacInput' } else { 'Lite' }
     $ui = @(); foreach ($k in $uiChecks.Keys) { if ($uiChecks[$k].Checked -and $mode -eq 'MacUI') { $ui += $k } }
@@ -269,7 +383,8 @@ function Start-Apply([bool]$installApps) {
         Shell = @{ ClassicTaskbar = $shBar.Checked; ClassicStart = $shStart.Checked; TaskbarLabels = $shLabels.Checked
                    ClassicEngine = @('ep', 'retrobar')[$cbEngine.SelectedIndex]; StartEngine = @('openshell', 'ep')[$cbStart.SelectedIndex]
                    Caption = @('off', 'traffic', 'fullscreen')[$cbCaption.SelectedIndex] }
-        RemoveEdge = $cbEdge.Checked; EdgeRedirect = $cbRedir.Checked
+        RemoveEdge = -not $br.Edge; EdgeRedirect = $cbRedir.Checked
+        Browsers = @{ Install = $br.Install; Remove = $br.Remove; Default = $br.Default }
     }
     $file = Join-Path $env:TEMP ("litewin-choices-{0}.json" -f [guid]::NewGuid().ToString('N'))
     $choices | ConvertTo-Json -Depth 4 | Set-Content $file -Encoding UTF8

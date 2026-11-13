@@ -12,6 +12,7 @@ $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $PSScriptRoot
 . (Join-Path $root 'lib\LiteWin.Modes.ps1')
 . (Join-Path $root 'lib\LiteWin.Edge.ps1')
+. (Join-Path $root 'lib\LiteWin.Browsers.ps1')
 
 $Host.UI.RawUI.WindowTitle = 'LiteWin 적용 중...'
 if (-not (Test-LWAdmin)) { Write-LWLog '관리자 권한이 필요합니다.' ERROR; Read-Host '종료하려면 Enter'; exit 1 }
@@ -39,10 +40,13 @@ if (-not (Test-WebView2Installed)) {
     if (-not (Invoke-Winget -Id 'Microsoft.EdgeWebView2Runtime' -Scope machine)) { $failed += 'WebView2 런타임' }
 }
 
-# ---- 2-1. 브라우저 확인 (설치 중 Chrome 설치가 실패했으면 다시) ----
-if (-not (Test-Path "$env:ProgramFiles\Google\Chrome\Application\chrome.exe")) {
-    Write-LWLog 'Chrome 이 없어 다시 설치합니다'
-    if (-not (Invoke-Winget -Id 'Google.Chrome' -Scope machine)) { $failed += 'Chrome' }
+# ---- 2-1. 브라우저: 고른 것 설치 → 기본 지정 → 뺀 것 제거 (마지막 브라우저는 남김) ----
+$br = $c.Browsers
+foreach ($id in @($br.Install)) { if ($id -and -not (Install-LWBrowser $id)) { $failed += "$($script:LWBrowsers[$id].Name) 설치" } }
+if ($c.RemoveEdge -and -not (Get-LWInstalledBrowsers | Where-Object { $_ -ne 'edge' })) {
+    # 어떤 이유로든 브라우저가 하나도 없으면 Chrome 을 다시 설치
+    Write-LWLog '브라우저가 없어 Chrome 을 설치합니다' WARN
+    if (-not (Install-LWBrowser 'chrome')) { $failed += 'Chrome' }
 }
 
 # ---- 3. 앱 설치 ----
@@ -59,6 +63,10 @@ try {
 # ---- 5. Edge (PC 전체 설정) ----
 $machineFile = Join-Path $script:LWRoot 'machine.json'
 if ($null -ne $c.RemoveEdge) {
+    if ($c.RemoveEdge -and -not (Get-LWInstalledBrowsers | Where-Object { $_ -ne 'edge' })) {
+        Write-LWLog '다른 브라우저가 없어 Edge 를 지우지 않습니다' WARN
+        $c.RemoveEdge = $false
+    }
     if ($c.RemoveEdge) {
         if (Test-EdgeInstalled) { [void](Remove-EdgeBrowser) }
         Register-EdgeGuardTask
@@ -73,8 +81,18 @@ if ($null -ne $c.RemoveEdge) {
     }
     if ($c.RemoveEdge -and $c.EdgeRedirect) { Register-EdgeRedirect }
     elseif ($c.RemoveEdge) { Unregister-EdgeRedirect }
-    @{ RemoveEdge = [bool]$c.RemoveEdge; EdgeRedirect = [bool]$c.EdgeRedirect } |
-        ConvertTo-Json | Set-Content $machineFile -Encoding UTF8
+    $mc = if (Test-Path $machineFile) { Get-Content $machineFile -Raw -Encoding UTF8 | ConvertFrom-Json } else { [pscustomobject]@{} }
+    $mc | Add-Member -NotePropertyName RemoveEdge -NotePropertyValue ([bool]$c.RemoveEdge) -Force
+    $mc | Add-Member -NotePropertyName EdgeRedirect -NotePropertyValue ([bool]$c.EdgeRedirect) -Force
+    $mc | ConvertTo-Json | Set-Content $machineFile -Encoding UTF8
+}
+
+# ---- 5-1. 기본 브라우저 / 제거 (Edge 처리 뒤에 해야 '마지막 브라우저' 판단이 맞음) ----
+if ($br -and $br.Default -and $br.Default -ne (Get-LWDefaultBrowserId)) {
+    if (Test-LWBrowserInstalled $br.Default) { [void](Set-LWDefaultBrowser $br.Default) }
+}
+foreach ($id in @($br.Remove)) {
+    if ($id -and $id -ne $br.Default -and -not (Uninstall-LWBrowser $id)) { $failed += "$($script:LWBrowsers[$id].Name) 제거" }
 }
 
 # ---- 6. 상태 저장 ----

@@ -16,6 +16,7 @@
 ; =============================================================================
 #Requires AutoHotkey v2.0
 #SingleInstance Force
+#NoTrayIcon                ; 트레이 아이콘 없이 조용히 동작 (끄기/켜기는 LiteWin 설정 또는 Ctrl+Alt+Win+F12)
 #UseHook true
 InstallKeybdHook
 SendMode "Input"
@@ -76,7 +77,7 @@ GroupAdd "Terminal", "ahk_exe mintty.exe"
 #SuspendExempt
 ^!#F12:: {
     Suspend -1
-    TrayTip "MacKeys", A_IsSuspended ? "맥 단축키 꺼짐" : "맥 단축키 켜짐", 1
+    ShowOsd(A_IsSuspended ? "맥 단축키 꺼짐" : "맥 단축키 켜짐")
 }
 #SuspendExempt false
 
@@ -199,8 +200,8 @@ MacF(n) {
         case 8:  Send "{Media_Play_Pause}"
         case 9:  Send "{Media_Next}"
         case 10: Send "{Volume_Mute}"
-        case 11: Send "{Volume_Down}"
-        case 12: Send "{Volume_Up}"
+        case 11: VolumeStep(-1)
+        case 12: VolumeStep(1)
     }
 }
 
@@ -243,6 +244,20 @@ Brightness(delta) {
         }
     }
     ShowOsd(level >= 0 ? "밝기 " level "%" : "밝기 조절을 지원하지 않는 화면")
+}
+
+; 볼륨: 맥처럼 0~100 을 12단계로 (한 번에 약 8.3%)
+VolumeStep(dir) {
+    step := 100 / 12
+    cur := SoundGetVolume()
+    lvl := Max(0, Min(12, Round(cur / step) + dir))
+    SoundSetVolume(lvl * step)
+    if (lvl > 0 && SoundGetMute())
+        SoundSetMute(false)
+    bar := ""
+    Loop 12
+        bar .= (A_Index <= lvl) ? "■" : "□"
+    ShowOsd("볼륨 " bar " " Round(lvl * step) "%")
 }
 
 ; 방해 금지(근사): Windows 알림 전체 켜기/끄기
