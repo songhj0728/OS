@@ -28,7 +28,7 @@ function Get-LWShellOptions {
     <# 상태 파일의 Shell 옵션 + 기본값 #>
     param($State = (Get-LWState))
     # ClassicEngine: ep = ExplorerPatcher Win10 작업표시줄 / retrobar,  StartEngine: openshell = Win7 / ep = Win10
-    $o = [ordered]@{ ClassicTaskbar = $true; ClassicEngine = 'ep'; ClassicStart = $true; StartEngine = 'openshell'; TaskbarLabels = $false; Caption = 'traffic' }
+    $o = [ordered]@{ ClassicTaskbar = $true; ClassicEngine = 'ep'; ClassicStart = $true; StartEngine = 'openshell'; TaskbarLabels = $false; Caption = 'traffic'; WallpaperSync = $true }
     if ($State.Shell) {
         foreach ($p in $State.Shell.PSObject.Properties) { $o[$p.Name] = $p.Value }
     }
@@ -183,6 +183,21 @@ function Start-LWShell {
         } else {
             if (Get-Process StartMenu -ErrorAction SilentlyContinue) { & $os -exit 2>$null; Stop-ProcessByPath 'StartMenu' }
         }
+    }
+
+    # ---- 배경화면: 첫 로그인 때 기본 배경 지정 + 다크/라이트 전환 연동 ----
+    $themeExe = Join-Path $script:LWRoot 'bin\LiteWinTheme.exe'
+    if (Test-Path $themeExe) {
+        if (-not $State.WallpaperInit) {
+            $light = (Get-RegValueEntry -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name 'AppsUseLightTheme')
+            $wp = Join-Path $env:WINDIR ('Web\Wallpaper\LiteWin\wave_{0}.jpg' -f $(if ($light -and [int]$light.Value -eq 0) { 'dark' } else { 'light' }))
+            if (Test-Path $wp) { Start-Process $themeExe -ArgumentList '-set', "`"$wp`"" -Wait }
+            $State | Add-Member -NotePropertyName WallpaperInit -NotePropertyValue $true -Force
+            Set-LWState $State
+        }
+        if ($o.WallpaperSync) {
+            if (-not (Get-Process LiteWinTheme -ErrorAction SilentlyContinue)) { Start-Process $themeExe }
+        } else { Stop-ProcessByPath 'LiteWinTheme' }
     }
 
     # ---- 창 버튼 오버레이 ----

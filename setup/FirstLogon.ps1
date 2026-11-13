@@ -13,7 +13,7 @@ Start-Transcript -Path $log -Append | Out-Null
 $exe = Join-Path $root 'bin\LiteWinSettings.exe'
 $settings = Join-Path $root 'app\LiteWinSettings.ps1'
 if (Test-Path $exe) {
-    Start-Process $exe -ArgumentList '-FirstRun'     # 콘솔 창 없이 바로 열림
+    Start-Process $exe -ArgumentList '-FirstRun' -Wait   # 전체 화면 마법사 — 끝날 때까지 설치의 일부로 진행
     Write-Output 'LiteWin 설정 마법사 실행 (exe)'
 } elseif (Test-Path $settings) {
     Start-Process powershell.exe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',

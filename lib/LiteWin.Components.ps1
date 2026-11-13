@@ -79,16 +79,17 @@ function ConvertTo-EPVersion([string]$s) {
 
 function Get-GitHubRelease {
     <# 최신 정식 릴리스 + 지정 자산. 배포 후 DelayDays 가 지나지 않았으면 그 이전 릴리스 중 가장 최신 #>
-    param([string]$Repo, [string]$Asset, [int]$DelayDays = 7)
+    param([string]$Repo, [string]$Asset, [int]$DelayDays = 7, [string]$AssetPattern)
     $h = @{ 'User-Agent' = 'LiteWin-Components'; 'Accept' = 'application/vnd.github+json' }
     $rels = Invoke-RestMethod -UseBasicParsing -Headers $h -Uri "https://api.github.com/repos/$Repo/releases?per_page=15" -TimeoutSec 30
     foreach ($r in $rels) {
         if ($r.draft -or $r.prerelease) { continue }
         if (([DateTime]$r.published_at).AddDays($DelayDays) -gt (Get-Date)) { continue }
-        $a = $r.assets | Where-Object name -eq $Asset | Select-Object -First 1
+        $a = if ($AssetPattern) { $r.assets | Where-Object { $_.name -match $AssetPattern } | Select-Object -First 1 }
+             else { $r.assets | Where-Object name -eq $Asset | Select-Object -First 1 }
         if (-not $a) { continue }
         return [pscustomobject]@{
-            Tag = $r.tag_name; Version = (ConvertTo-EPVersion $r.tag_name); Published = [DateTime]$r.published_at
+            Tag = $r.tag_name; Version = (ConvertTo-EPVersion $r.tag_name); Published = [DateTime]$r.published_at; AssetName = $a.name
             Url = $a.browser_download_url; Sha256 = if ($a.digest -match '^sha256:([0-9a-fA-F]{64})$') { $Matches[1].ToUpper() } else { $null }
         }
     }

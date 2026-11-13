@@ -92,4 +92,4 @@ if ($failed.Count) {
 }
 Write-Host '마우스/트랙패드 등 일부 설정은 재부팅(또는 로그아웃) 후 완전히 반영됩니다.' -ForegroundColor Cyan
 Remove-Item $ChoicesFile -Force -ErrorAction SilentlyContinue
-Read-Host "`n닫으려면 Enter"
+if ($c.FirstRun) { Start-Sleep -Seconds 3 } else { Read-Host "`n닫으려면 Enter" }

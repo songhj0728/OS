@@ -273,7 +273,7 @@ function Start-Apply([bool]$installApps) {
     }
     $file = Join-Path $env:TEMP ("litewin-choices-{0}.json" -f [guid]::NewGuid().ToString('N'))
     $choices | ConvertTo-Json -Depth 4 | Set-Content $file -Encoding UTF8
-    Start-Process powershell.exe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+    $script:ApplyProc = Start-Process powershell.exe -PassThru -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
         "`"$(Join-Path $PSScriptRoot 'Apply-LiteWin.ps1')`"", '-ChoicesFile', "`"$file`"")
     $form.Close()
 }
@@ -289,4 +289,31 @@ $btnSkip.add_Click({
 })
 $btnClose.add_Click({ $form.Close() })
 
-[void]$form.ShowDialog()
+if ($FirstRun) {
+    # 첫 로그인: 설치의 마지막 단계처럼 전체 화면 배경 위에서 묻는다. 적용이 끝나면 바탕화면이 나온다.
+    $screen = [Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $back = New-Object Windows.Forms.Form
+    $back.FormBorderStyle = 'None'; $back.StartPosition = 'Manual'; $back.Bounds = $screen
+    $back.ShowInTaskbar = $false; $back.BackColor = [Drawing.Color]::FromArgb(43, 47, 56)
+    $img = Join-Path $env:WINDIR 'Web\Wallpaper\LiteWin\wave_dark.jpg'
+    if (Test-Path $img) { try { $back.BackgroundImage = [Drawing.Image]::FromFile($img); $back.BackgroundImageLayout = 'Stretch' } catch { } }
+    $title = New-Object Windows.Forms.Label
+    $title.Text = 'LiteWin 설정을 마무리합니다'; $title.AutoSize = $true; $title.BackColor = [Drawing.Color]::Transparent
+    $title.ForeColor = [Drawing.Color]::White; $title.Font = New-Object Drawing.Font('Malgun Gothic', 22)
+    $title.Location = New-Object Drawing.Point(60, 50)
+    $sub = New-Object Windows.Forms.Label
+    $sub.Text = '원하는 방식을 고르세요. 나중에 시작 메뉴 > LiteWin 설정 에서 언제든 바꿀 수 있습니다.'; $sub.AutoSize = $true
+    $sub.BackColor = [Drawing.Color]::Transparent; $sub.ForeColor = [Drawing.Color]::Gainsboro
+    $sub.Font = New-Object Drawing.Font('Malgun Gothic', 11); $sub.Location = New-Object Drawing.Point(64, 105)
+    $back.Controls.AddRange(@($title, $sub))
+    $back.Show()
+    $form.StartPosition = 'CenterParent'
+    [void]$form.ShowDialog($back)
+    if ($script:ApplyProc) {
+        $title.Text = '적용하는 중입니다…'; $sub.Text = '끝나면 바탕화면이 나타납니다. 진행 상황은 가운데 창에 표시됩니다.'
+        while (-not $script:ApplyProc.HasExited) { [Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 200 }
+    }
+    $back.Close()
+} else {
+    [void]$form.ShowDialog()
+}

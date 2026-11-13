@@ -119,3 +119,27 @@ jobs:
           $out = Join-Path $env:RUNNER_TEMP 'bin2'
           & "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File .\build\Compile-LiteWinTools.ps1 -OutDir $out | Out-Host
           foreach ($f in Get-ChildItem $out -Filter *.exe) { Remove-Item $f.FullName -ErrorAction Stop; Write-Host "deleted (not locked): $($f.Name)" }
+
+      - name: GitHub fallback asset patterns (MPC-BE, ImageGlass, RetroBar)
+        shell: powershell
+        run: |
+          . .\lib\LiteWin.Components.ps1
+          $bad = 0
+          foreach ($x in @(
+            @{ Repo = 'Aleksoid1978/MPC-BE'; Pattern = 'x64.*installer.*\.(zip|exe)$' }
+            @{ Repo = 'd2phap/ImageGlass';   Pattern = 'x64\.msi$' }
+            @{ Repo = 'dremin/RetroBar';     Pattern = '(Installer|Setup).*\.exe$|^RetroBar\.zip$' }
+          )) {
+            $r = Get-GitHubRelease -Repo $x.Repo -AssetPattern $x.Pattern -DelayDays 0
+            if ($r) { Write-Host "$($x.Repo): $($r.Tag) $($r.AssetName) sha256=$($r.Sha256)" } else { Write-Host "::error::no asset for $($x.Repo)"; $bad++ }
+          }
+          if ($bad) { exit 1 }
+
+      - name: Theme tool sets wallpaper pair name logic compiles and runs -once
+        shell: powershell
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'bin3'
+          & .\build\Compile-LiteWinTools.ps1 -OutDir $out | Out-Null
+          $p = Start-Process "$out\LiteWinTheme.exe" -ArgumentList '-once' -Wait -PassThru
+          Write-Host "LiteWinTheme -once exit $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) { exit 1 }

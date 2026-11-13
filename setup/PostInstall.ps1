@@ -40,6 +40,24 @@ if ($p.DisableHibernation) {
 
 # 예약 저장소(업데이트용 7GB 가량 미리 잡아두는 공간)는 업데이트 안정성을 위해 그대로 둔다.
 
+# ---------------------------------------------------------------- HKLM 정책 다시 적용
+#   빌드 때 오프라인 레지스트리에 권한 문제로 못 쓴 값(예: 위젯 끄기)이 있어도 여기서 SYSTEM 권한으로 다시 쓴다.
+$polFile = Join-Path $root 'policies.json'
+if (Test-Path $polFile) {
+    $n = 0
+    foreach ($t in @(Get-Content $polFile -Raw -Encoding UTF8 | ConvertFrom-Json)) {
+        try {
+            $sub = if ($t.Hive -eq 'SYSTEM') { 'SYSTEM\' + ($t.Path -replace '^ControlSet001', 'CurrentControlSet') } else { 'SOFTWARE\' + $t.Path }
+            if ($sub -like 'SYSTEM\Setup\*') { continue }
+            $key = "HKLM:\$sub"
+            if (-not (Test-Path -LiteralPath $key)) { New-Item -Path $key -Force | Out-Null }
+            New-ItemProperty -LiteralPath $key -Name $t.Name -Value $t.Value -PropertyType $t.Type -Force | Out-Null
+            $n++
+        } catch { Log "정책 적용 실패: $($t.Path)\$($t.Name) — $_" }
+    }
+    Log "HKLM 정책 $n개 다시 적용"
+}
+
 # ---------------------------------------------------------------- Chrome (기본 브라우저)
 $chromeMsi = Join-Path $root 'payload\chrome.msi'
 $chromeOk = $false
@@ -78,6 +96,14 @@ if (Test-Path $payloadJson) {
         $file = Join-Path $payloadDir $pl.File
         if (-not (Test-Path $file)) { continue }
         try {
+            if ($file -like '*.zip') {
+                # 포터블 프로그램: Program Files 아래에 풀기만 한다
+                $target = Join-Path $env:ProgramFiles $pl.PortableDir
+                Expand-Archive -Path $file -DestinationPath $target -Force
+                Log "설치(포터블): $($pl.Name) → $target"
+                Remove-Item $file -Force -ErrorAction SilentlyContinue
+                continue
+            }
             if ($file -like '*.msi') {
                 $proc = Start-Process msiexec.exe -ArgumentList "/i `"$file`" $($pl.Args)" -Wait -PassThru
             } elseif ($pl.Args) {

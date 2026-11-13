@@ -55,6 +55,24 @@ function Remove-EdgeShortcuts {
     $paths += Get-ChildItem 'C:\Users\*\AppData\Roaming\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\Microsoft Edge.lnk' -ErrorAction SilentlyContinue | ForEach-Object FullName
     $paths += Get-ChildItem 'C:\Users\*\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Microsoft Edge.lnk' -ErrorAction SilentlyContinue | ForEach-Object FullName
     foreach ($p in $paths) { if ($p -and (Test-Path $p)) { Remove-Item $p -Force -ErrorAction SilentlyContinue } }
+    if (-not (Test-EdgeInstalled)) { Remove-EdgeAssociations }
+}
+
+function Remove-EdgeAssociations {
+    <# Edge 가 없는데 남아 있는 파일 연결 흔적 정리 → '연결 프로그램' 목록에 Edge 가 나오지 않게 #>
+    $c = 'HKLM:\SOFTWARE\Classes'
+    foreach ($k in "$c\MSEdgeHTM", "$c\MSEdgePDF", "$c\MSEdgeMHT", "$c\Applications\msedge.exe",
+                   'HKLM:\SOFTWARE\Clients\StartMenuInternet\Microsoft Edge', 'HKLM:\SOFTWARE\WOW6432Node\Clients\StartMenuInternet\Microsoft Edge') {
+        if (Test-Path $k) { Remove-Item $k -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    Remove-ItemProperty 'HKLM:\SOFTWARE\RegisteredApplications' -Name 'Microsoft Edge' -ErrorAction SilentlyContinue
+    foreach ($ext in '.htm', '.html', '.shtml', '.xht', '.xhtml', '.xml', '.pdf', '.svg', '.mht', '.mhtml', '.webp', '.url') {
+        foreach ($owp in "$c\$ext\OpenWithProgids", "HKCU:\Software\Classes\$ext\OpenWithProgids") {
+            $item = Get-Item $owp -ErrorAction SilentlyContinue
+            if (-not $item) { continue }
+            foreach ($n in $item.GetValueNames()) { if ($n -like 'MSEdge*') { Remove-ItemProperty $owp -Name $n -ErrorAction SilentlyContinue } }
+        }
+    }
 }
 
 function Remove-EdgeBrowser {

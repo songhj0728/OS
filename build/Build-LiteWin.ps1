@@ -37,6 +37,8 @@
 .PARAMETER Fast              빠른 빌드(테스트용). WorkDir\cache 에 중간 결과를 저장해 다음 빌드부터 재사용:
                              ISO 풀기/Pro 추출, 앱 제거·레지스트리·Edge 제거까지 끝난 이미지, 내려받은 설치 파일(7일).
                              구성요소 정리(ResetBase)와 최대 압축을 생략한다 → ISO 가 조금 크다. 배포용은 -Fast 없이.
+.PARAMETER SetupBackground   Windows 설치 프로그램(디스크 고르는 화면) 배경색. 기본은 배경화면과 어울리는 짙은 청회색 #2B2F38.
+                             빈 문자열이면 바꾸지 않는다. -Fast 캐시가 있으면 cache 폴더를 지워야 색이 다시 적용된다.
 .PARAMETER NoChrome          Chrome 을 넣지 않음 (Edge 도 제거하지 않음)
 
 .EXAMPLE
@@ -61,6 +63,7 @@ param(
     [switch]$NoIso,
     [switch]$NoChrome,
     [switch]$Fast,
+    [string]$SetupBackground = '#2B2F38',
     [switch]$KeepWorkDir
 )
 
@@ -79,9 +82,10 @@ $ChromeMsiUrl = 'https://dl.google.com/dl/chrome/install/googlechromestandalonee
 #   설치 마지막 단계(SetupComplete)에서 인터넷 없이 무인 설치된다. Args 를 비우면 매니페스트의 설치 종류로 판단.
 $Payloads = @(
     @{ Name = 'autohotkey'; Id = 'AutoHotkey.AutoHotkey';       Args = '' }                         # 맥 입력
-    @{ Name = 'mpc-be';     Id = 'MPC-BE.MPC-BE';               Args = '' }                         # 동영상 기본 (HEVC 등)
-    @{ Name = 'imageglass'; Id = 'DuongDieuPhap.ImageGlass';    Args = '' }                         # .heic/.heif 기본
-    @{ Name = 'retrobar';   Id = 'dremin.RetroBar';             Args = '' }                         # 클래식 작업표시줄
+    # Repo/Pattern: winget download 가 실패하면 GitHub 공식 릴리스에서 받는다. FallbackArgs: 그때 쓸 무인 설치 옵션
+    @{ Name = 'mpc-be';     Id = 'MPC-BE.MPC-BE';               Args = ''; Repo = 'Aleksoid1978/MPC-BE'; Pattern = 'x64.*installer.*\.(zip|exe)$'; FallbackArgs = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-' }
+    @{ Name = 'imageglass'; Id = 'DuongDieuPhap.ImageGlass';    Args = ''; Repo = 'd2phap/ImageGlass';   Pattern = 'x64\.msi$' }
+    @{ Name = 'retrobar';   Id = 'dremin.RetroBar';             Args = ''; Repo = 'dremin/RetroBar';     Pattern = '(Installer|Setup).*\.exe$|^RetroBar\.zip$'; FallbackArgs = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-'; PortableDir = 'RetroBar' }
     @{ Name = 'openshell';  Id = 'Open-Shell.Open-Shell-Menu';  Args = '/qn ADDLOCAL=StartMenu' }   # Win7 시작 메뉴
 )
 
@@ -105,20 +109,44 @@ function Save-WingetPayloads([string]$Dest) {
         $have = Get-ChildItem $dir -File | Where-Object { $_.Extension -in '.exe', '.msi' } | Select-Object -First 1
         if (-not ($Fast -and $have -and (Test-FreshFile $have.FullName))) {
             Get-ChildItem $dir -File | Remove-Item -Force
-            & $winget download --id $p.Id --exact --source winget --download-directory $dir `
-                --accept-package-agreements --accept-source-agreements --disable-interactivity | Out-Null
+            $wgOut = & $winget download --id $p.Id --exact --source winget --download-directory $dir `
+                --accept-package-agreements --accept-source-agreements --disable-interactivity 2>&1 | Out-String
         }
         $installer = Get-ChildItem $dir -File | Where-Object { $_.Extension -in '.exe', '.msi' } | Select-Object -First 1
         $yaml = Get-ChildItem $dir -File -Filter *.yaml | Select-Object -First 1
-        if (-not $installer) { Warn "$($p.Id): 다운로드 실패 — 건너뜀"; continue }
+        $fromGitHub = $false
+        if (-not $installer -and $p.Repo) {
+            $why = (("$wgOut" -split "`r?`n" | Where-Object { $_.Trim() -and $_ -notmatch '^[\s\-\\|/█▒]+$' } | Select-Object -Last 2) -join ' / ')
+            Warn "$($p.Id): winget 다운로드 실패 ($why) → GitHub 공식 릴리스($($p.Repo))에서 받습니다"
+            try {
+                $rel = Get-GitHubRelease -Repo $p.Repo -AssetPattern $p.Pattern -DelayDays 0
+                if ($rel) {
+                    $f = Join-Path $dir $rel.AssetName
+                    [void](Save-VerifiedAsset -Release $rel -OutFile $f -AllowUnverified)
+                    if ($f -like '*.zip') {
+                        # zip 안에 설치 프로그램이 있으면 꺼내 쓰고, 없으면(포터블) zip 그대로 넣는다
+                        $x = Join-Path $dir 'x'; Expand-Archive $f $x -Force
+                        $inner = Get-ChildItem $x -Recurse -File | Where-Object { $_.Extension -in '.exe', '.msi' -and $_.Name -match '(setup|install)' } | Select-Object -First 1
+                        if ($inner) { Copy-Item $inner.FullName $dir -Force; Remove-Item $f -Force }
+                        Remove-Item $x -Recurse -Force
+                    }
+                    $installer = Get-ChildItem $dir -File | Where-Object { $_.Extension -in '.exe', '.msi' } | Select-Object -First 1
+                    if (-not $installer -and (Test-Path $f) -and $p.PortableDir) { $installer = Get-Item $f }
+                    $fromGitHub = [bool]$installer
+                }
+            } catch { Warn "$($p.Id): GitHub 에서도 실패 — $($_.Exception.Message)" }
+        }
+        if (-not $installer) { Warn "$($p.Id): 다운로드 실패 — 건너뜀 (설치 후 인터넷으로 받음)"; continue }
         $yamlText = if ($yaml) { Get-Content $yaml.FullName -Raw } else { '' }
         $type = if ($yamlText -match '(?m)^\s*InstallerType:\s*(\S+)') { $Matches[1].ToLower() } elseif ($installer.Extension -eq '.msi') { 'msi' } else { 'exe' }
         $silent = if ($yamlText -match '(?m)^\s*Silent:\s*(.+)$') { $Matches[1].Trim().Trim("'").Trim('"') } else { '' }
         $args2 = if ($p.Args) { $p.Args } else { Get-SilentArgs $type $silent }
+        if ($installer.Extension -eq '.zip') { $type = 'zip'; $args2 = 'portable' }
+        elseif (-not $args2 -and $fromGitHub) { $args2 = if ($installer.Extension -eq '.msi') { '/qn /norestart' } else { $p.FallbackArgs } }
         if (-not $args2 -and $installer.Extension -ne '.msi') { Warn "$($p.Id): 무인 설치 방법을 알 수 없음($type) — 건너뜀"; continue }
         $file = "$($p.Name)$($installer.Extension)"
         Copy-Item $installer.FullName (Join-Path $Dest $file) -Force
-        $result += [ordered]@{ Name = $p.Name; Id = $p.Id; File = $file; Type = $type; Args = $args2 }
+        $result += [ordered]@{ Name = $p.Name; Id = $p.Id; File = $file; Type = $type; Args = $args2; PortableDir = "$($p.PortableDir)" }
         Info ("{0}: {1} ({2}, {3:N1}MB)" -f $p.Name, $installer.Name, $type, ($installer.Length / 1MB))
     }
     return $result
@@ -316,6 +344,40 @@ try {
             Dismount-DiskImage -ImagePath (Resolve-Path $IsoPath).Path | Out-Null
         }
         Get-ChildItem $isoDir -Recurse -File | ForEach-Object { $_.IsReadOnly = $false }
+
+        # 설치 프로그램 배경 (boot.wim 의 Windows Setup 이미지 안 sources\background.bmp 교체)
+        if ($SetupBackground -match '^#?([0-9a-fA-F]{6})$') {
+            Step "설치 프로그램 배경색: #$($Matches[1])"
+            $rgb = [Convert]::ToInt32($Matches[1], 16)
+            $bootWim = Join-Path $isoDir 'sources\boot.wim'
+            $bootMount = Join-Path $WorkDir 'mountboot'
+            try {
+                Add-Type -AssemblyName System.Drawing
+                $bmpFile = Join-Path $tmpDir 'background.bmp'
+                $bmp = New-Object System.Drawing.Bitmap 1920, 1080, ([System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
+                $g = [System.Drawing.Graphics]::FromImage($bmp)
+                $g.Clear([System.Drawing.Color]::FromArgb(($rgb -shr 16) -band 255, ($rgb -shr 8) -band 255, $rgb -band 255))
+                $g.Dispose(); $bmp.Save($bmpFile, [System.Drawing.Imaging.ImageFormat]::Bmp); $bmp.Dispose()
+
+                $setupIndex = (Get-WindowsImage -ImagePath $bootWim | Sort-Object ImageIndex | Select-Object -Last 1).ImageIndex
+                New-Item -ItemType Directory -Path $bootMount -Force | Out-Null
+                Mount-WindowsImage -ImagePath $bootWim -Index $setupIndex -Path $bootMount | Out-Null
+                try {
+                    $targets = @(Get-ChildItem (Join-Path $bootMount 'sources') -Filter 'background*.bmp' -ErrorAction SilentlyContinue)
+                    if (-not $targets.Count) { Warn '이 버전의 설치 프로그램에는 background.bmp 가 없습니다 — 새 파일로 넣지만 적용되지 않을 수 있습니다' }
+                    $names = if ($targets.Count) { $targets.FullName } else { @(Join-Path $bootMount 'sources\background.bmp') }
+                    foreach ($t in $names) {
+                        if (Test-Path $t) { & takeown.exe /F $t /A 2>&1 | Out-Null; & icacls.exe $t /grant '*S-1-5-32-544:F' /C /Q 2>&1 | Out-Null }
+                        Copy-Item $bmpFile $t -Force
+                        Info "- $(Split-Path $t -Leaf)"
+                    }
+                    Dismount-WindowsImage -Path $bootMount -Save | Out-Null
+                } catch {
+                    Dismount-WindowsImage -Path $bootMount -Discard -ErrorAction SilentlyContinue | Out-Null
+                    throw
+                }
+            } catch { Warn "설치 프로그램 배경 변경 실패 — 원래 화면으로 진행: $($_.Exception.Message)" }
+        }
     }
 
     $chromeMsi = Join-Path $(if ($Fast) { $dlCache } else { $tmpDir }) 'chrome.msi'
@@ -473,6 +535,13 @@ try {
     foreach ($d in 'lib', 'app', 'apps', 'macstyle') {
         Copy-Item (Join-Path $RepoRoot $d) $lw -Recurse -Force
     }
+    # 배경화면 (기본: wave_light / 다크 모드: wave_dark, 그 밖의 그림은 설정 > 개인 설정에서 선택)
+    $wpDir = Join-Path $mountDir 'Windows\Web\Wallpaper\LiteWin'
+    New-Item -ItemType Directory -Path $wpDir -Force | Out-Null
+    Copy-Item (Join-Path $RepoRoot 'assets\wallpapers\*') $wpDir -Force
+    # HKLM 정책 목록: 오프라인에서 권한 문제로 못 쓴 값이 있어도 설치 마지막 단계(SYSTEM)에서 다시 적용한다
+    ConvertTo-Json -InputObject @($script:OfflineRegTweaks | Where-Object { $_.Hive -ne 'NTUSER' }) -Depth 3 |
+        Out-File (Join-Path $lw 'policies.json') -Encoding utf8
     $cfg | ConvertTo-Json -Depth 5 | Out-File (Join-Path $lw 'profile.json') -Encoding utf8
     @{ RemoveEdge = $cfg.RemoveEdge; EdgeRedirect = $cfg.RemoveEdge; BrowserName = 'Google Chrome' } | ConvertTo-Json |
         Out-File (Join-Path $lw 'machine.json') -Encoding utf8
@@ -486,7 +555,7 @@ try {
     & "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass `
         -File (Join-Path $PSScriptRoot 'Compile-LiteWinTools.ps1') -OutDir $toolOut | Out-Host
     $toolFail = @()
-    foreach ($exe in 'LiteWinEdgeRedirect.exe', 'LiteWinCaption.exe', 'LiteWinSettings.exe') {
+    foreach ($exe in 'LiteWinEdgeRedirect.exe', 'LiteWinCaption.exe', 'LiteWinTheme.exe', 'LiteWinSettings.exe') {
         $src = Join-Path $toolOut $exe
         if (Test-Path $src) { Copy-Item $src (Join-Path $lw "bin\$exe") -Force } else { $toolFail += $exe }
     }

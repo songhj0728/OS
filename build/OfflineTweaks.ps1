@@ -58,7 +58,7 @@ $script:OfflineRegTweaks = @(
     # ---------- 탐색기/작업표시줄 (맥 Dock 처럼 가운데 정렬은 기본값 유지) ----------
     @{ Hive='NTUSER'; Path='Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name='HideFileExt'; Type='DWord'; Value=0 }   # 확장자 보이기
     @{ Hive='NTUSER'; Path='Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name='LaunchTo'; Type='DWord'; Value=1 }      # 탐색기 = 내 PC
-    @{ Hive='NTUSER'; Path='Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name='TaskbarDa'; Type='DWord'; Value=0 }     # 위젯 버튼
+    # (TaskbarDa 는 Windows 가 보호하는 값이라 넣지 않는다. 위젯 앱 자체를 이미지에서 빼고 AllowNewsAndInterests 정책으로 끈다)
     @{ Hive='NTUSER'; Path='Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name='TaskbarMn'; Type='DWord'; Value=0 }     # 채팅 버튼
     @{ Hive='NTUSER'; Path='Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name='ShowCopilotButton'; Type='DWord'; Value=0 }
     @{ Hive='NTUSER'; Path='Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name='Start_IrisRecommendations'; Type='DWord'; Value=0 } # 시작메뉴 추천 광고
@@ -84,6 +84,17 @@ $script:OfflineRegTweaks += @(
     # 로그인할 때마다 LiteWin 셸(클래식 작업표시줄/시작 메뉴/창 버튼) 적용
     @{ Hive='SOFTWARE'; Path='Microsoft\Windows\CurrentVersion\Run'; Name='LiteWinShell'; Type='String'
        Value='powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "C:\ProgramData\LiteWin\app\Start-LiteWinShell.ps1"' }
+)
+
+# 기본 배경화면(라이트: wave_light, 다크로 바꾸면 LiteWinTheme 가 wave_dark 로) / 강조색은 배경에서 자동 / 잠금 화면
+$script:OfflineRegTweaks += @(
+    @{ Hive='NTUSER'; Path='Control Panel\Desktop'; Name='Wallpaper'; Type='String'; Value='C:\Windows\Web\Wallpaper\LiteWin\wave_light.jpg' }
+    @{ Hive='NTUSER'; Path='Control Panel\Desktop'; Name='WallpaperStyle'; Type='String'; Value='10' }
+    @{ Hive='NTUSER'; Path='Control Panel\Desktop'; Name='TileWallpaper'; Type='String'; Value='0' }
+    @{ Hive='NTUSER'; Path='Control Panel\Desktop'; Name='AutoColorization'; Type='DWord'; Value=1 }
+    @{ Hive='SOFTWARE'; Path='Microsoft\Windows\CurrentVersion\PersonalizationCSP'; Name='LockScreenImagePath'; Type='String'; Value='C:\Windows\Web\Wallpaper\LiteWin\wave_dark.jpg' }
+    @{ Hive='SOFTWARE'; Path='Microsoft\Windows\CurrentVersion\PersonalizationCSP'; Name='LockScreenImageUrl'; Type='String'; Value='C:\Windows\Web\Wallpaper\LiteWin\wave_dark.jpg' }
+    @{ Hive='SOFTWARE'; Path='Microsoft\Windows\CurrentVersion\PersonalizationCSP'; Name='LockScreenImageStatus'; Type='DWord'; Value=1 }
 )
 
 # 존재하면 삭제할 키 (24H2: 설치 직후 Outlook/DevHome 을 몰래 다시 까는 예약)

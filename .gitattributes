@@ -4,3 +4,4 @@
 *.cmd  text eol=crlf
 *.ahk  text eol=crlf
 *.xml  text eol=crlf
+*.jpg binary
