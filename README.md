@@ -151,6 +151,20 @@ Set-ExecutionPolicy -Scope Process Bypass
   - `-BypassHardwareCheck`: TPM 검사 등을 우회. 발로란트를 못 쓰게 되고, MS가 업데이트를 보장하지 않음
   - `-NoChrome`: Chrome을 넣지 않음 (이 경우 Edge도 제거하지 않음)
 
+### 배경화면과 테마
+- 설정 > 개인 설정 > **테마**에 LiteWin 테마 4개가 들어 있습니다. 테마마다 배경화면과 다크/라이트 모드가 짝지어져 있어서, 고르면 둘이 같이 바뀝니다.
+
+  | 테마 | 배경화면 | 모드 |
+  |---|---|---|
+  | **LiteWin 라이트 (기본)** | wave_light | 라이트 |
+  | LiteWin 다크 | wave_dark | 다크 |
+  | LiteWin 리본 | ribbon | 다크 |
+  | LiteWin 도형 | shapes | 라이트 |
+
+- 새 계정은 LiteWin 라이트로 시작합니다. 강제 설정이 아니라 기본값일 뿐이라, 배경화면·잠금 화면·색은 Windows 설정에서 자유롭게 바꿀 수 있습니다.
+- 그림 파일은 `C:\Windows\Web\Wallpaper\LiteWin`에 있습니다. 개인 설정 > 배경 > 사진 찾아보기에서 직접 골라도 됩니다.
+- 그림을 바꾸거나 추가하려면 저장소의 `assets\wallpapers` 폴더를 고친 뒤 다시 빌드하세요.
+
 ### 빠르게 반복 테스트하기
 - **빠른 빌드:** `.\build\Build-LiteWin.ps1 -Fast`
   - 중간 결과를 `C:\LiteWinWork\cache`에 저장해 두고 다음 빌드부터 재사용합니다. 재사용 대상은 ISO 내용, Pro 이미지, 앱 제거·레지스트리·Edge 제거까지 끝난 이미지, 내려받은 설치 파일(7일간)입니다.

@@ -40,6 +40,10 @@
     </component>
     <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
       <TimeZone>{{TIMEZONE}}</TimeZone>
+      <Themes>
+        <!-- 새 계정 기본 테마 (배경 wave_light + 라이트 모드). 설정 > 개인 설정 > 테마 에서 LiteWin 다크/리본/도형 으로 바꿀 수 있다 -->
+        <CustomDefaultThemeFile>%WINDIR%\Resources\Themes\LiteWinLight.theme</CustomDefaultThemeFile>
+      </Themes>
       <OOBE>
         <HideEULAPage>true</HideEULAPage>
         <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>

@@ -86,17 +86,6 @@ $script:OfflineRegTweaks += @(
        Value='powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "C:\ProgramData\LiteWin\app\Start-LiteWinShell.ps1"' }
 )
 
-# 기본 배경화면(라이트: wave_light, 다크로 바꾸면 LiteWinTheme 가 wave_dark 로) / 강조색은 배경에서 자동 / 잠금 화면
-$script:OfflineRegTweaks += @(
-    @{ Hive='NTUSER'; Path='Control Panel\Desktop'; Name='Wallpaper'; Type='String'; Value='C:\Windows\Web\Wallpaper\LiteWin\wave_light.jpg' }
-    @{ Hive='NTUSER'; Path='Control Panel\Desktop'; Name='WallpaperStyle'; Type='String'; Value='10' }
-    @{ Hive='NTUSER'; Path='Control Panel\Desktop'; Name='TileWallpaper'; Type='String'; Value='0' }
-    @{ Hive='NTUSER'; Path='Control Panel\Desktop'; Name='AutoColorization'; Type='DWord'; Value=1 }
-    @{ Hive='SOFTWARE'; Path='Microsoft\Windows\CurrentVersion\PersonalizationCSP'; Name='LockScreenImagePath'; Type='String'; Value='C:\Windows\Web\Wallpaper\LiteWin\wave_dark.jpg' }
-    @{ Hive='SOFTWARE'; Path='Microsoft\Windows\CurrentVersion\PersonalizationCSP'; Name='LockScreenImageUrl'; Type='String'; Value='C:\Windows\Web\Wallpaper\LiteWin\wave_dark.jpg' }
-    @{ Hive='SOFTWARE'; Path='Microsoft\Windows\CurrentVersion\PersonalizationCSP'; Name='LockScreenImageStatus'; Type='DWord'; Value=1 }
-)
-
 # 존재하면 삭제할 키 (24H2: 설치 직후 Outlook/DevHome 을 몰래 다시 까는 예약)
 $script:OfflineRegDeleteKeys = @(
     @{ Hive='SOFTWARE'; Path='Microsoft\WindowsUpdate\Orchestrator\UScheduler_Oobe\OutlookUpdate' }

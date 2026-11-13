@@ -138,11 +138,11 @@ jobs:
           }
           if ($bad) { exit 1 }
 
-      - name: Theme tool sets wallpaper pair name logic compiles and runs -once
+      - name: Default theme file is set in unattend template
         shell: powershell
         run: |
-          $out = Join-Path $env:RUNNER_TEMP 'bin3'
-          & .\build\Compile-LiteWinTools.ps1 -OutDir $out | Out-Null
-          $p = Start-Process "$out\LiteWinTheme.exe" -ArgumentList '-once' -Wait -PassThru
-          Write-Host "LiteWinTheme -once exit $($p.ExitCode)"
-          if ($p.ExitCode -ne 0) { exit 1 }
+          $x = [xml](Get-Content unattend\autounattend.template.xml -Raw)
+          $ns = New-Object Xml.XmlNamespaceManager $x.NameTable; $ns.AddNamespace('u', 'urn:schemas-microsoft-com:unattend')
+          $t = $x.SelectSingleNode('//u:CustomDefaultThemeFile', $ns)
+          if (-not $t -or $t.InnerText -notlike '*LiteWinLight.theme') { throw 'CustomDefaultThemeFile missing' }
+          Write-Host "default theme: $($t.InnerText)"

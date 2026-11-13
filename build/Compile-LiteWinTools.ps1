@@ -31,7 +31,6 @@ $adminManifest = @'
 $tools = @(
     @{ Src = 'shell\EdgeRedirect.cs';            Out = 'LiteWinEdgeRedirect.exe'; Refs = @();                                       Manifest = $null }
     @{ Src = 'shell\LiteWinCaption.cs';          Out = 'LiteWinCaption.exe';      Refs = @('System.Windows.Forms.dll', 'System.Drawing.dll'); Manifest = $null }
-    @{ Src = 'shell\LiteWinTheme.cs';            Out = 'LiteWinTheme.exe';        Refs = @();                                       Manifest = $null }
     @{ Src = 'shell\LiteWinSettingsLauncher.cs'; Out = 'LiteWinSettings.exe';     Refs = @('System.Windows.Forms.dll', [psobject].Assembly.Location); Manifest = $adminManifest }
 )
 

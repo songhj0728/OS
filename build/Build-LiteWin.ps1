@@ -536,10 +536,54 @@ try {
     foreach ($d in 'lib', 'app', 'apps', 'macstyle') {
         Copy-Item (Join-Path $RepoRoot $d) $lw -Recurse -Force
     }
-    # 배경화면 (기본: wave_light / 다크 모드: wave_dark, 그 밖의 그림은 설정 > 개인 설정에서 선택)
+    # 배경화면 + Windows 테마 (설정 > 개인 설정 > 테마 에 'LiteWin …' 으로 나타남)
+    #   테마 하나에 배경화면과 다크/라이트 모드가 묶여 있어서, 고르면 둘이 같이 바뀐다 (별도 프로그램 없음)
+    #   새 계정 기본값은 autounattend 의 CustomDefaultThemeFile = LiteWin 라이트
     $wpDir = Join-Path $mountDir 'Windows\Web\Wallpaper\LiteWin'
     New-Item -ItemType Directory -Path $wpDir -Force | Out-Null
     Copy-Item (Join-Path $RepoRoot 'assets\wallpapers\*') $wpDir -Force
+    $themeDir = Join-Path $mountDir 'Windows\Resources\Themes'
+    foreach ($th in @(
+        @{ File = 'LiteWinLight.theme';  Name = 'LiteWin 라이트';      Wallpaper = 'wave_light.jpg'; Mode = 'Light'; Id = '{6F2B9B8E-2C1A-4C55-9E21-5A1F0B7C1A01}' }
+        @{ File = 'LiteWinDark.theme';   Name = 'LiteWin 다크';        Wallpaper = 'wave_dark.jpg';  Mode = 'Dark';  Id = '{6F2B9B8E-2C1A-4C55-9E21-5A1F0B7C1A02}' }
+        @{ File = 'LiteWinRibbon.theme'; Name = 'LiteWin 리본';        Wallpaper = 'ribbon.jpg';     Mode = 'Dark';  Id = '{6F2B9B8E-2C1A-4C55-9E21-5A1F0B7C1A03}' }
+        @{ File = 'LiteWinShapes.theme'; Name = 'LiteWin 도형';        Wallpaper = 'shapes.jpg';     Mode = 'Light'; Id = '{6F2B9B8E-2C1A-4C55-9E21-5A1F0B7C1A04}' }
+    )) {
+        $text = @"
+; LiteWin 테마 — 배경화면과 다크/라이트 모드를 함께 바꾼다
+[Theme]
+DisplayName=$($th.Name)
+ThemeId=$($th.Id)
+
+[Control Panel\Desktop]
+Wallpaper=%SystemRoot%\Web\Wallpaper\LiteWin\$($th.Wallpaper)
+TileWallpaper=0
+WallpaperStyle=10
+Pattern=
+
+[VisualStyles]
+Path=%ResourceDir%\Themes\Aero\Aero.msstyles
+ColorStyle=NormalColor
+Size=NormalSize
+AutoColorization=1
+ColorizationColor=0XC42B2F38
+SystemMode=$($th.Mode)
+AppMode=$($th.Mode)
+VisualStyleVersion=10
+
+[MasterThemeSelector]
+MTSM=RJSPBS
+
+[Sounds]
+SchemeName=@%SystemRoot%\System32\mmres.dll,-800
+
+[boot]
+SCRNSAVE.EXE=
+"@
+        # .theme 은 UTF-16(유니코드)로 저장해야 한글 이름이 깨지지 않는다
+        [IO.File]::WriteAllText((Join-Path $themeDir $th.File), $text, [Text.Encoding]::Unicode)
+    }
+    Info "테마 4개: LiteWin 라이트(기본) / 다크 / 리본 / 도형"
     # HKLM 정책 목록: 오프라인에서 권한 문제로 못 쓴 값이 있어도 설치 마지막 단계(SYSTEM)에서 다시 적용한다
     ConvertTo-Json -InputObject @($script:OfflineRegTweaks | Where-Object { $_.Hive -ne 'NTUSER' }) -Depth 3 |
         Out-File (Join-Path $lw 'policies.json') -Encoding utf8
@@ -556,7 +600,7 @@ try {
     & "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass `
         -File (Join-Path $PSScriptRoot 'Compile-LiteWinTools.ps1') -OutDir $toolOut | Out-Host
     $toolFail = @()
-    foreach ($exe in 'LiteWinEdgeRedirect.exe', 'LiteWinCaption.exe', 'LiteWinTheme.exe', 'LiteWinSettings.exe') {
+    foreach ($exe in 'LiteWinEdgeRedirect.exe', 'LiteWinCaption.exe', 'LiteWinSettings.exe') {
         $src = Join-Path $toolOut $exe
         if (Test-Path $src) { Copy-Item $src (Join-Path $lw "bin\$exe") -Force } else { $toolFail += $exe }
     }
