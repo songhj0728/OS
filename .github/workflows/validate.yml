@@ -167,6 +167,7 @@ jobs:
       - name: Build script preflight (loads every helper, stops at the missing-ISO check)
         shell: powershell
         run: |
+          $ErrorActionPreference = 'Continue'   # 예상된 오류(ISO 없음)가 stderr 로 나오므로 여기서 멈추지 않게
           $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build\Build-LiteWin.ps1 -IsoPath C:\no-such.iso -NoIso 2>&1 | Out-String
           Write-Host $out
           if ($out -notmatch 'ISO 파일이 없습니다') { Write-Host '::error::build script failed before the ISO check'; exit 1 }
