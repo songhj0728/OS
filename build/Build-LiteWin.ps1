@@ -85,7 +85,7 @@ $Payloads = @(
     # Repo/Pattern: winget download 가 실패하면 GitHub 공식 릴리스에서 받는다. FallbackArgs: 그때 쓸 무인 설치 옵션
     @{ Name = 'mpc-be';     Id = 'MPC-BE.MPC-BE';               Args = ''; Repo = 'Aleksoid1978/MPC-BE'; Pattern = 'x64.*installer.*\.(zip|exe)$'; FallbackArgs = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-' }
     @{ Name = 'imageglass'; Id = 'DuongDieuPhap.ImageGlass';    Args = ''; Repo = 'd2phap/ImageGlass';   Pattern = 'x64\.msi$' }
-    @{ Name = 'retrobar';   Id = 'dremin.RetroBar';             Args = ''; Repo = 'dremin/RetroBar';     Pattern = '(Installer|Setup).*\.exe$|x64.*\.(exe|zip)$|^RetroBar\.zip$'; FallbackArgs = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-'; PortableDir = 'RetroBar' }
+    @{ Name = 'retrobar';   Id = 'dremin.RetroBar';             Args = ''; Repo = 'dremin/RetroBar';     Pattern = 'Installer\.(zip|exe)$'; FallbackArgs = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-'; PortableDir = 'RetroBar' }
     @{ Name = 'dotnet-desktop'; Id = 'Microsoft.DotNet.DesktopRuntime.10'; Args = '/install /quiet /norestart' }   # RetroBar 실행에 필요
     @{ Name = 'openshell';  Id = 'Open-Shell.Open-Shell-Menu';  Args = '/qn ADDLOCAL=StartMenu' }   # Win7 시작 메뉴
 )
