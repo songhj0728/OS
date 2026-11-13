@@ -117,6 +117,16 @@ if (Test-Path $payloadJson) {
     }
 }
 
+# ExplorerPatcher 설치 확인 (Windows 보안이 오탐지로 막는 일이 있어 결과를 남긴다)
+if (Test-Path (Join-Path $payloadDir 'ep_setup.exe')) {
+    if (Test-Path "$env:ProgramFiles\ExplorerPatcher\ExplorerPatcher.amd64.dll") { Log 'ExplorerPatcher 설치 확인' }
+    else {
+        $blocked = $false
+        try { $blocked = [bool](Get-MpThreatDetection -ErrorAction Stop | Where-Object { "$($_.Resources)" -match 'ExplorerPatcher|ep_setup|dxgi\.dll' }) } catch { }
+        Log ("ExplorerPatcher 가 설치되지 않음" + $(if ($blocked) { ' — Windows 보안이 차단함 (보호 기록 확인)' } else { '' }) + ' — 첫 로그인 마법사에서 다시 시도하고, 안 되면 RetroBar 사용')
+    }
+}
+
 # ---------------------------------------------------------------- 기본 앱: 웹=Chrome, 동영상=MPC-BE(HEVC 포함), .heic=ImageGlass
 #   설치된 프로그램이 등록한 ProgId 를 직접 찾아 기본 앱 연결 파일을 만들고, 첫 로그인 전에 가져온다(새 사용자에 적용).
 function Find-ProgId([string]$ext, [string]$pattern) {

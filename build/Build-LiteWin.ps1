@@ -344,40 +344,6 @@ try {
             Dismount-DiskImage -ImagePath (Resolve-Path $IsoPath).Path | Out-Null
         }
         Get-ChildItem $isoDir -Recurse -File | ForEach-Object { $_.IsReadOnly = $false }
-
-        # 설치 프로그램 배경 (boot.wim 의 Windows Setup 이미지 안 sources\background.bmp 교체)
-        if ($SetupBackground -match '^#?([0-9a-fA-F]{6})$') {
-            Step "설치 프로그램 배경색: #$($Matches[1])"
-            $rgb = [Convert]::ToInt32($Matches[1], 16)
-            $bootWim = Join-Path $isoDir 'sources\boot.wim'
-            $bootMount = Join-Path $WorkDir 'mountboot'
-            try {
-                Add-Type -AssemblyName System.Drawing
-                $bmpFile = Join-Path $tmpDir 'background.bmp'
-                $bmp = New-Object System.Drawing.Bitmap 1920, 1080, ([System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
-                $g = [System.Drawing.Graphics]::FromImage($bmp)
-                $g.Clear([System.Drawing.Color]::FromArgb(($rgb -shr 16) -band 255, ($rgb -shr 8) -band 255, $rgb -band 255))
-                $g.Dispose(); $bmp.Save($bmpFile, [System.Drawing.Imaging.ImageFormat]::Bmp); $bmp.Dispose()
-
-                $setupIndex = (Get-WindowsImage -ImagePath $bootWim | Sort-Object ImageIndex | Select-Object -Last 1).ImageIndex
-                New-Item -ItemType Directory -Path $bootMount -Force | Out-Null
-                Mount-WindowsImage -ImagePath $bootWim -Index $setupIndex -Path $bootMount | Out-Null
-                try {
-                    $targets = @(Get-ChildItem (Join-Path $bootMount 'sources') -Filter 'background*.bmp' -ErrorAction SilentlyContinue)
-                    if (-not $targets.Count) { Warn '이 버전의 설치 프로그램에는 background.bmp 가 없습니다 — 새 파일로 넣지만 적용되지 않을 수 있습니다' }
-                    $names = if ($targets.Count) { $targets.FullName } else { @(Join-Path $bootMount 'sources\background.bmp') }
-                    foreach ($t in $names) {
-                        if (Test-Path $t) { & takeown.exe /F $t /A 2>&1 | Out-Null; & icacls.exe $t /grant '*S-1-5-32-544:F' /C /Q 2>&1 | Out-Null }
-                        Copy-Item $bmpFile $t -Force
-                        Info "- $(Split-Path $t -Leaf)"
-                    }
-                    Dismount-WindowsImage -Path $bootMount -Save | Out-Null
-                } catch {
-                    Dismount-WindowsImage -Path $bootMount -Discard -ErrorAction SilentlyContinue | Out-Null
-                    throw
-                }
-            } catch { Warn "설치 프로그램 배경 변경 실패 — 원래 화면으로 진행: $($_.Exception.Message)" }
-        }
     }
 
     $chromeMsi = Join-Path $(if ($Fast) { $dlCache } else { $tmpDir }) 'chrome.msi'
@@ -431,6 +397,47 @@ try {
             @{ UiLang = $uiLang; Version = "$($pro.Version)"; ImageName = $pro.ImageName } | ConvertTo-Json |
                 Set-Content (Join-Path $baseCache 'meta.json') -Encoding UTF8    # 마지막에 써서 '완성' 표시
         }
+    }
+
+    # ========================================================== 3-1. 설치 프로그램 배경
+    #   빠른 빌드 캐시에는 원본 boot.wim 이 들어 있으므로, 매번 여기서 바꾼다 (색을 바꿔도 바로 반영)
+    #   Windows 설치 화면 배경은 boot.wim 안 sources\background_*.bmp(또는 .png) 이다. 두 이미지(WinPE, Setup) 모두 확인한다.
+    if ($SetupBackground -match '^#?([0-9a-fA-F]{6})$') {
+        Step "설치 프로그램 배경색: #$($Matches[1])"
+        $rgb = [Convert]::ToInt32($Matches[1], 16)
+        $color = [System.Drawing.Color]::FromArgb(($rgb -shr 16) -band 255, ($rgb -shr 8) -band 255, $rgb -band 255)
+        $bootWim = Join-Path $isoDir 'sources\boot.wim'
+        $bootMount = Join-Path $WorkDir 'mountboot'
+        Add-Type -AssemblyName System.Drawing
+        $replaced = 0
+        foreach ($bi in @(Get-WindowsImage -ImagePath $bootWim | Sort-Object ImageIndex)) {
+            if (Test-Path $bootMount) { Remove-Item $bootMount -Recurse -Force -ErrorAction SilentlyContinue }
+            New-Item -ItemType Directory -Path $bootMount -Force | Out-Null
+            try {
+                Mount-WindowsImage -ImagePath $bootWim -Index $bi.ImageIndex -Path $bootMount | Out-Null
+                $found = @(Get-ChildItem (Join-Path $bootMount 'sources') -File -ErrorAction SilentlyContinue |
+                           Where-Object { $_.Name -match '^background.*\.(bmp|png|jpg)$' })
+                Info ("[{0}] {1}: {2}" -f $bi.ImageIndex, $bi.ImageName, $(if ($found) { ($found.Name -join ', ') } else { '배경 파일 없음' }))
+                foreach ($f in $found) {
+                    $size = try { $im = [System.Drawing.Image]::FromFile($f.FullName); $sz = $im.Size; $im.Dispose(); $sz } catch { New-Object System.Drawing.Size 1920, 1080 }
+                    $bmp = New-Object System.Drawing.Bitmap $size.Width, $size.Height, ([System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
+                    $g = [System.Drawing.Graphics]::FromImage($bmp); $g.Clear($color); $g.Dispose()
+                    $fmt = switch ($f.Extension.ToLower()) { '.png' { [System.Drawing.Imaging.ImageFormat]::Png } '.jpg' { [System.Drawing.Imaging.ImageFormat]::Jpeg } default { [System.Drawing.Imaging.ImageFormat]::Bmp } }
+                    $tmpImg = Join-Path $tmpDir ("setupbg-" + $f.Name)
+                    $bmp.Save($tmpImg, $fmt); $bmp.Dispose()
+                    & takeown.exe /F $f.FullName /A 2>&1 | Out-Null
+                    & icacls.exe $f.FullName /grant '*S-1-5-32-544:F' /C /Q 2>&1 | Out-Null
+                    Copy-Item $tmpImg $f.FullName -Force
+                    $replaced++
+                }
+                [GC]::Collect()
+                if ($found) { Dismount-WindowsImage -Path $bootMount -Save | Out-Null } else { Dismount-WindowsImage -Path $bootMount -Discard | Out-Null }
+            } catch {
+                Warn "설치 프로그램 배경 변경 실패 ([$($bi.ImageIndex)]): $($_.Exception.Message)"
+                Dismount-WindowsImage -Path $bootMount -Discard -ErrorAction SilentlyContinue | Out-Null
+            }
+        }
+        if (-not $replaced) { Warn '설치 프로그램 배경 파일을 찾지 못했습니다 — 위 목록을 알려주세요' }
     }
 
     # ========================================================== 4. 마운트
@@ -583,6 +590,23 @@ SCRNSAVE.EXE=
         [IO.File]::WriteAllText((Join-Path $themeDir $th.File), $text, [Text.Encoding]::Unicode)
     }
     Info "테마 4개: LiteWin 라이트(기본) / 다크 / 리본 / 도형"
+
+    # Windows 기본 배경화면 자체를 바꾼다 → 설치가 끝나면 바로 이 배경. Windows 기본 테마(밝게/어둡게)도 이 그림을 쓴다
+    #   img0 = 기본(밝게) → wave_light, img19 = 어둡게 → wave_dark, 4K 폴더의 해상도별 사본, 잠금 화면 기본 img100
+    $wpSrc = Join-Path $RepoRoot 'assets\wallpapers'
+    $swaps = @()
+    $swaps += Get-ChildItem (Join-Path $mountDir 'Windows\Web\Wallpaper\Windows') -File -Filter 'img0*.jpg' -ErrorAction SilentlyContinue | ForEach-Object { @{ T = $_.FullName; S = 'wave_light.jpg' } }
+    $swaps += Get-ChildItem (Join-Path $mountDir 'Windows\Web\Wallpaper\Windows') -File -Filter 'img19*.jpg' -ErrorAction SilentlyContinue | ForEach-Object { @{ T = $_.FullName; S = 'wave_dark.jpg' } }
+    $swaps += Get-ChildItem (Join-Path $mountDir 'Windows\Web\4K\Wallpaper\Windows') -File -Filter 'img0_*.jpg' -ErrorAction SilentlyContinue | ForEach-Object { @{ T = $_.FullName; S = 'wave_light.jpg' } }
+    $swaps += Get-ChildItem (Join-Path $mountDir 'Windows\Web\4K\Wallpaper\Windows') -File -Filter 'img19_*.jpg' -ErrorAction SilentlyContinue | ForEach-Object { @{ T = $_.FullName; S = 'wave_dark.jpg' } }
+    $swaps += Get-ChildItem (Join-Path $mountDir 'Windows\Web\Screen') -File -Filter 'img100.jpg' -ErrorAction SilentlyContinue | ForEach-Object { @{ T = $_.FullName; S = 'wave_light.jpg' } }
+    $n = 0
+    foreach ($w in $swaps) {
+        & takeown.exe /F $w.T /A 2>&1 | Out-Null
+        & icacls.exe $w.T /grant '*S-1-5-32-544:F' /C /Q 2>&1 | Out-Null
+        try { Copy-Item (Join-Path $wpSrc $w.S) $w.T -Force -ErrorAction Stop; $n++ } catch { Warn "배경 교체 실패: $($w.T.Substring($mountDir.Length))" }
+    }
+    Info "Windows 기본 배경화면 교체: $n 개 (기본 = wave_light, 어둡게 = wave_dark, 잠금 화면)"
     # HKLM 정책 목록: 오프라인에서 권한 문제로 못 쓴 값이 있어도 설치 마지막 단계(SYSTEM)에서 다시 적용한다
     ConvertTo-Json -InputObject @($script:OfflineRegTweaks | Where-Object { $_.Hive -ne 'NTUSER' }) -Depth 3 |
         Out-File (Join-Path $lw 'policies.json') -Encoding utf8

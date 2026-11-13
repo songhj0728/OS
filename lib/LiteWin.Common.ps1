@@ -14,8 +14,44 @@ function Write-LWLog {
         if (-not (Test-Path $script:LWLogDir)) { New-Item -ItemType Directory -Path $script:LWLogDir -Force | Out-Null }
         Add-Content -Path (Join-Path $script:LWLogDir $File) -Value $line -Encoding UTF8
     } catch { }
-    $color = @{ INFO = 'Gray'; WARN = 'Yellow'; ERROR = 'Red' }[$Level]
-    Write-Host $line -ForegroundColor $color
+    # LiteWin 설정 창의 진행 표시(같은 프로세스의 다른 runspace)로 전달
+    $sync = Get-Variable -Name LWProgress -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    if ($sync) { [void]$sync.Log.Add(('{0} {1}' -f $(if ($Level -eq 'INFO') { '·' } else { '!' }), $Message)) }
+    elseif ($Host.Name -eq 'ConsoleHost') {
+        $color = @{ INFO = 'Gray'; WARN = 'Yellow'; ERROR = 'Red' }[$Level]
+        Write-Host $line -ForegroundColor $color
+    }
+}
+
+function Set-LWProgress {
+    <# 진행 막대 갱신 (설정 창에서 실행될 때만 의미 있음) #>
+    param([int]$Percent, [string]$Status)
+    $sync = Get-Variable -Name LWProgress -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    if ($sync) { $sync.Percent = [Math]::Max(0, [Math]::Min(100, $Percent)); if ($Status) { $sync.Status = $Status } }
+    elseif ($Status -and $Host.Name -eq 'ConsoleHost') { Write-Host "[$Percent%] $Status" -ForegroundColor Cyan }
+}
+
+function Invoke-Hidden {
+    <#
+        콘솔 프로그램(winget, dism 등)을 창 없이 실행하고 출력을 UTF-8 로 받는다.
+        (콘솔에 그대로 찍으면 창이 뜨고, 코드 페이지가 달라 한글이 깨진다)
+        .OUTPUTS @{ Code; Output }
+    #>
+    param([Parameter(Mandatory)][string]$File, [string[]]$ArgumentList = @(), [int]$TimeoutMinutes = 30)
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $File
+    $psi.Arguments = ($ArgumentList | ForEach-Object { if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ } }) -join ' '
+    $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
+    $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
+    $psi.StandardOutputEncoding = [Text.Encoding]::UTF8; $psi.StandardErrorEncoding = [Text.Encoding]::UTF8
+    $p = [System.Diagnostics.Process]::Start($psi)
+    $errTask = $p.StandardError.ReadToEndAsync()
+    $out = $p.StandardOutput.ReadToEnd()
+    if (-not $p.WaitForExit($TimeoutMinutes * 60000)) { try { $p.Kill() } catch { } }
+    $all = $out + $errTask.Result
+    # 진행 표시용 회전 문자/막대 줄은 버린다
+    $clean = ($all -split "`r?`n|`r" | Where-Object { $_.Trim() -and $_ -notmatch '^[\s\-\\|/█▒■□]+$' -and $_ -notmatch '^\s*[\d.]+\s*(KB|MB|GB)\s*/' }) -join "`n"
+    [pscustomobject]@{ Code = $p.ExitCode; Output = $clean }
 }
 
 function Test-LWAdmin {
@@ -173,10 +209,13 @@ function Invoke-Winget {
               '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity')
     if ($Scope) { $wargs += @('--scope', $Scope) }
     $wargs += $ExtraArgs
-    & $winget @wargs | Out-Host
-    $code = $LASTEXITCODE
+    $r = Invoke-Hidden -File $winget -ArgumentList $wargs
+    $code = $r.Code
     # 0 = 성공, -1978335189 (0x8A15002B) = 이미 설치됨/업데이트 없음, -1978335135 (0x8A150061) = 이미 설치됨
     $ok = $code -in @(0, -1978335189, -1978335135)
-    if (-not $ok) { Write-LWLog "winget 실패: $Id ($Source) 코드 $code" WARN }
+    if (-not $ok) {
+        $why = (($r.Output -split "`n") | Select-Object -Last 2) -join ' / '
+        Write-LWLog "winget 실패: $Id ($Source) 코드 $code — $why" WARN
+    }
     return $ok
 }

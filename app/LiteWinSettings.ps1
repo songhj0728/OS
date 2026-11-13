@@ -5,9 +5,10 @@
     - 브라우저: Chrome 기본, Edge 제거/리다이렉트
     창은 열었을 때만 실행된다(상주 없음). 적용은 별도 콘솔 창(Apply-LiteWin.ps1)에서 진행.
 
-    -FirstRun : 첫 로그인 마법사 모드 (프로필 기본 선택값을 미리 체크)
+    -FirstRun     : 첫 로그인 마법사 모드 (프로필 기본 선택값을 미리 체크, 전체 화면)
+    -ApplyPending : Administrator 계정으로 바꾼 뒤 첫 로그인 — 저장해 둔 선택을 적용하고 이전 계정을 지운다
 #>
-param([switch]$FirstRun)
+param([switch]$FirstRun, [switch]$ApplyPending)
 
 $root = Split-Path -Parent $PSScriptRoot
 . (Join-Path $root 'lib\LiteWin.Common.ps1')
@@ -124,26 +125,30 @@ if ($FirstRun) {
     $txtPw2   = New-TextRow $p0 '암호 확인' -Password
     [void](Add-Label $p0 '    암호를 비워 두면 암호 없이 로그인합니다. 다른 사람이 쓰는 PC 라면 암호를 정하세요.' $small $gray)
 
-    [void](Add-Label $p0 '고급' $bold $null 14)
-    $cbAdmin = Add-Check $p0 '기본 제공 Administrator 계정도 사용' $false 12
-    [void](Add-Label $p0 '    Windows 에 숨겨져 있는 최고 권한 계정을 켭니다. 일반적인 사용에는 필요 없습니다.' $small $gray)
+    [void](Add-Label $p0 '계정 종류' $bold $null 14)
+    $rbAcctUser  = Add-Radio $p0 '일반 계정 (권장) — 위 이름으로, 필요할 때만 관리자 권한 확인' $true
+    $rbAcctUser.Font = $font
+    $rbAcctAdmin = Add-Radio $p0 'Administrator 계정 하나만 사용 — 위 계정을 지우고 기본 제공 Administrator 로 바꿈' $false
+    $rbAcctAdmin.Font = $font
     $txtAdm  = New-TextRow $p0 'Administrator 암호' -Password
     $txtAdm2 = New-TextRow $p0 '암호 확인' -Password
     $txtAdm.Enabled = $false; $txtAdm2.Enabled = $false
     $script:adminConfirmed = $false
-    $cbAdmin.add_CheckedChanged({
-        if ($cbAdmin.Checked -and -not $script:adminConfirmed) {
+    $rbAcctAdmin.add_CheckedChanged({
+        if ($rbAcctAdmin.Checked -and -not $script:adminConfirmed) {
             $m1 = "기본 제공 Administrator 계정은 사용자 계정 컨트롤(UAC) 확인 없이 모든 프로그램이 최고 권한으로 실행됩니다.`n`n" +
                   "- 악성 프로그램이 확인 창 없이 시스템 전체를 바꿀 수 있습니다`n- 실수로 시스템 파일을 지워도 막아 주지 않습니다`n- 일부 Store 앱과 보안 기능이 제한될 수 있습니다`n`n계속할까요?"
-            $r1 = [Windows.Forms.MessageBox]::Show($m1, '보안 경고', 'YesNo', 'Warning', 'Button2')
+            $r1 = [Windows.Forms.MessageBox]::Show($m1, '보안 경고 (1/2)', 'YesNo', 'Warning', 'Button2')
             $r2 = 'No'
             if ($r1 -eq 'Yes') {
-                $r2 = [Windows.Forms.MessageBox]::Show("한 번 더 확인합니다.`n`nAdministrator 계정을 켜고, 반드시 암호를 정해야 합니다. 평소에는 위의 일반 계정을 쓰고, 필요할 때만 Administrator 로 로그인하는 것을 권장합니다.`n`n정말 켤까요?", '보안 경고 (2/2)', 'YesNo', 'Warning', 'Button2')
+                $r2 = [Windows.Forms.MessageBox]::Show("한 번 더 확인합니다.`n`n지금 계정('$env:USERNAME')과 그 안의 파일이 지워지고, 이 PC 에는 Administrator 계정 하나만 남습니다. Administrator 에는 반드시 암호를 정해야 합니다.`n`n정말 바꿀까요?", '보안 경고 (2/2)', 'YesNo', 'Warning', 'Button2')
             }
-            if ($r2 -ne 'Yes') { $cbAdmin.Checked = $false; return }
+            if ($r2 -ne 'Yes') { $rbAcctUser.Checked = $true; return }
             $script:adminConfirmed = $true
         }
-        $txtAdm.Enabled = $cbAdmin.Checked; $txtAdm2.Enabled = $cbAdmin.Checked
+        $on = $rbAcctAdmin.Checked
+        $txtAdm.Enabled = $on; $txtAdm2.Enabled = $on
+        $txtName.Enabled = -not $on; $txtPw.Enabled = -not $on; $txtPw2.Enabled = -not $on
     })
 
     function Invoke-AccountSetup {
@@ -154,21 +159,24 @@ if ($FirstRun) {
             [Windows.Forms.MessageBox]::Show('이름은 20자 이하이고 " / \ [ ] : ; | = , + * ? < > @ 를 쓸 수 없습니다.', 'LiteWin') | Out-Null; return $false
         }
         if ($txtPw.Text -ne $txtPw2.Text) { [Windows.Forms.MessageBox]::Show('암호가 서로 다릅니다.', 'LiteWin') | Out-Null; return $false }
-        if ($cbAdmin.Checked) {
+        if ($rbAcctAdmin.Checked) {
             if (-not $txtAdm.Text) { [Windows.Forms.MessageBox]::Show('Administrator 계정에는 암호가 꼭 필요합니다.', 'LiteWin') | Out-Null; return $false }
             if ($txtAdm.Text -ne $txtAdm2.Text) { [Windows.Forms.MessageBox]::Show('Administrator 암호가 서로 다릅니다.', 'LiteWin') | Out-Null; return $false }
         }
         try {
             $me = $env:USERNAME
-            if ($name -ne $me) { Rename-LocalUser -Name $me -NewName $name -ErrorAction Stop }
-            Set-LocalUser -Name $name -FullName $name -ErrorAction SilentlyContinue
-            if ($txtPw.Text) { Set-LocalUser -Name $name -Password (ConvertTo-SecureString $txtPw.Text -AsPlainText -Force) -ErrorAction Stop }
-            if ($cbAdmin.Checked) {
+            if ($rbAcctAdmin.Checked) {
+                # Administrator 하나만: 켜고 암호를 정한 뒤, 지금 계정은 Administrator 첫 로그인 때 지운다
                 $adm = Get-LocalUser | Where-Object { $_.SID.Value -like 'S-1-5-*-500' } | Select-Object -First 1
                 Set-LocalUser -SID $adm.SID -Password (ConvertTo-SecureString $txtAdm.Text -AsPlainText -Force) -ErrorAction Stop
                 Enable-LocalUser -SID $adm.SID -ErrorAction Stop
-                Write-LWLog "기본 제공 Administrator 계정 켬 (사용자 확인 2회)" WARN
+                $script:AdminHandoff = @{ OldUser = $me; Admin = $adm.Name }
+                Write-LWLog "Administrator 계정 하나만 사용 선택 (경고 2회 확인) — '$me' 는 Administrator 첫 로그인 때 삭제" WARN
+                return $true
             }
+            if ($name -ne $me) { Rename-LocalUser -Name $me -NewName $name -ErrorAction Stop }
+            Set-LocalUser -Name $name -FullName $name -ErrorAction SilentlyContinue
+            if ($txtPw.Text) { Set-LocalUser -Name $name -Password (ConvertTo-SecureString $txtPw.Text -AsPlainText -Force) -ErrorAction Stop }
             Write-LWLog "계정 이름: $name (로그아웃 후 표시 반영)"
             return $true
         } catch {
@@ -364,7 +372,7 @@ function Start-Apply([bool]$installApps) {
                "언제든 '라이트 윈도우'로 돌아가면 프로그램이 멈추고 원래 키 배치로 돌아갑니다. 켤까요?"
         if ([Windows.Forms.MessageBox]::Show($msg, '맥 입력 켜기', 'YesNo', 'Information') -ne 'Yes') { return }
     }
-    if ($acct -or $FirstRun) { if (-not (Invoke-AccountSetup)) { $tabs.SelectedIndex = 0; return } }
+    if ($FirstRun) { if (-not (Invoke-AccountSetup)) { $tabs.SelectedIndex = 0; return } }
     try { Save-ComponentOptions } catch { }
     $mode = if ($rbUi.Checked) { 'MacUI' } elseif ($rbMac.Checked) { 'MacInput' } else { 'Lite' }
     $ui = @(); foreach ($k in $uiChecks.Keys) { if ($uiChecks[$k].Checked -and $mode -eq 'MacUI') { $ui += $k } }
@@ -386,11 +394,75 @@ function Start-Apply([bool]$installApps) {
         RemoveEdge = -not $br.Edge; EdgeRedirect = $cbRedir.Checked
         Browsers = @{ Install = $br.Install; Remove = $br.Remove; Default = $br.Default }
     }
+    if ($script:AdminHandoff) {
+        # Administrator 로 바꾸는 경우: 선택은 저장해 두고 Administrator 첫 로그인 때 적용한다
+        $pending = Join-Path $script:LWRoot 'pending-choices.json'
+        $choices.HandoffFrom = $script:AdminHandoff.OldUser
+        $choices | ConvertTo-Json -Depth 4 | Set-Content $pending -Encoding UTF8
+        $exe = Join-Path $script:LWRoot 'bin\LiteWinSettings.exe'
+        $act = New-ScheduledTaskAction -Execute $exe -Argument '-ApplyPending'
+        $trg = New-ScheduledTaskTrigger -AtLogOn -User $script:AdminHandoff.Admin
+        $prn = New-ScheduledTaskPrincipal -UserId $script:AdminHandoff.Admin -LogonType Interactive -RunLevel Highest
+        Register-ScheduledTask -TaskPath '\LiteWin\' -TaskName 'LiteWin Admin Handoff' -Action $act -Trigger $trg -Principal $prn -Force | Out-Null
+        Set-RegValue 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' 'AutoAdminLogon' '0' String
+        Set-RegValue 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' 'DefaultUserName' $script:AdminHandoff.Admin String
+        [Windows.Forms.MessageBox]::Show("지금 로그아웃합니다. Administrator 로 로그인하면 고른 설정이 적용되고, '$($script:AdminHandoff.OldUser)' 계정이 지워집니다.", 'LiteWin') | Out-Null
+        $script:LogoffAfter = $true
+        $form.Close(); return
+    }
     $file = Join-Path $env:TEMP ("litewin-choices-{0}.json" -f [guid]::NewGuid().ToString('N'))
     $choices | ConvertTo-Json -Depth 4 | Set-Content $file -Encoding UTF8
-    $script:ApplyProc = Start-Process powershell.exe -PassThru -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
-        "`"$(Join-Path $PSScriptRoot 'Apply-LiteWin.ps1')`"", '-ChoicesFile', "`"$file`"")
+    $script:PendingFile = $file
     $form.Close()
+}
+
+function Show-ApplyProgress {
+    <#
+        고른 내용을 이 프로세스 안에서(콘솔 창 없이) 적용하고, 진행 막대와 기록을 한 창에 보여준다.
+        Apply-LiteWin.ps1 은 별도 runspace 에서 돌고, 공유 해시테이블(LWProgress)로 진행 상황을 넘긴다.
+    #>
+    param([string]$ChoicesFile, $Owner)
+    $sync = [hashtable]::Synchronized(@{ Percent = 0; Status = '준비 중…'; Log = [Collections.ArrayList]::Synchronized((New-Object Collections.ArrayList)) })
+    $iss = [Management.Automation.Runspaces.InitialSessionState]::CreateDefault()
+    $iss.ExecutionPolicy = [Microsoft.PowerShell.ExecutionPolicy]::Bypass
+    $rs = [runspacefactory]::CreateRunspace($iss); $rs.ApartmentState = 'STA'; $rs.Open()
+    $rs.SessionStateProxy.SetVariable('LWProgress', $sync)
+    $ps = [powershell]::Create(); $ps.Runspace = $rs
+    [void]$ps.AddCommand((Join-Path $PSScriptRoot 'Apply-LiteWin.ps1')).AddParameter('ChoicesFile', $ChoicesFile)
+    $handle = $ps.BeginInvoke()
+
+    $pf = New-Object Windows.Forms.Form
+    $pf.Text = 'LiteWin — 적용 중'; $pf.Font = $font; $pf.FormBorderStyle = 'FixedDialog'; $pf.MaximizeBox = $false; $pf.MinimizeBox = $false
+    $pf.ClientSize = New-Object Drawing.Size(560, 330); $pf.StartPosition = if ($Owner) { 'CenterParent' } else { 'CenterScreen' }
+    $lbl = New-Object Windows.Forms.Label; $lbl.Font = $bold; $lbl.Location = New-Object Drawing.Point(18, 16); $lbl.Size = New-Object Drawing.Size(520, 24)
+    $bar = New-Object Windows.Forms.ProgressBar; $bar.Location = New-Object Drawing.Point(18, 46); $bar.Size = New-Object Drawing.Size(522, 20); $bar.Style = 'Continuous'
+    $box = New-Object Windows.Forms.TextBox; $box.Multiline = $true; $box.ReadOnly = $true; $box.ScrollBars = 'Vertical'
+    $box.Location = New-Object Drawing.Point(18, 78); $box.Size = New-Object Drawing.Size(522, 196); $box.BackColor = [Drawing.Color]::White
+    $ok = New-Object Windows.Forms.Button; $ok.Text = '닫기'; $ok.Enabled = $false; $ok.Size = New-Object Drawing.Size(100, 30)
+    $ok.Location = New-Object Drawing.Point(440, 288); $ok.add_Click({ $pf.Close() })
+    $pf.Controls.AddRange(@($lbl, $bar, $box, $ok))
+    $view = @{ Shown = 0 }   # 클로저 안에서 바뀌어야 하므로 해시테이블에 담는다
+    $timer = New-Object Windows.Forms.Timer; $timer.Interval = 200
+    $timer.add_Tick({
+        $bar.Value = [int]$sync.Percent; $lbl.Text = $sync.Status
+        while ($view.Shown -lt $sync.Log.Count) { $box.AppendText($sync.Log[$view.Shown] + "`r`n"); $view.Shown++ }
+        if ($handle.IsCompleted) {
+            $timer.Stop()
+            try { $res = $ps.EndInvoke($handle) } catch { $box.AppendText("! $($_.Exception.Message)`r`n") }
+            $failed = @($res | ForEach-Object { $_ } | Where-Object { $_ })
+            $bar.Value = 100
+            $lbl.Text = if ($failed.Count) { '완료 — 일부 항목 실패: ' + ($failed -join ', ') } else { '모두 완료되었습니다' }
+            $ok.Enabled = $true; $pf.AcceptButton = $ok
+            if ($FirstRun -and -not $failed.Count) {
+                $auto = New-Object Windows.Forms.Timer; $auto.Interval = 2500
+                $auto.add_Tick({ $auto.Stop(); $pf.Close() }.GetNewClosure()); $auto.Start()
+            }
+        }
+    }.GetNewClosure())
+    $pf.add_FormClosing({ param($s2, $e2) if (-not $handle.IsCompleted) { $e2.Cancel = $true } }.GetNewClosure())
+    $timer.Start()
+    if ($Owner) { [void]$pf.ShowDialog($Owner) } else { [void]$pf.ShowDialog() }
+    $ps.Dispose(); $rs.Close()
 }
 
 $btnApply.add_Click({ Start-Apply $true })
@@ -404,31 +476,86 @@ $btnSkip.add_Click({
 })
 $btnClose.add_Click({ $form.Close() })
 
+function New-CoverImage([string]$path, [int]$w, [int]$h) {
+    <# 화면 비율에 맞게 잘라 채운 배경 (늘려서 찌그러지지 않게) #>
+    $src = [Drawing.Image]::FromFile($path)
+    try {
+        $scale = [Math]::Max($w / $src.Width, $h / $src.Height)
+        $sw = [int]($w / $scale); $sh = [int]($h / $scale)
+        $sx = [int](($src.Width - $sw) / 2); $sy = [int](($src.Height - $sh) / 2)
+        $bmp = New-Object Drawing.Bitmap $w, $h
+        $g = [Drawing.Graphics]::FromImage($bmp); $g.InterpolationMode = 'HighQualityBicubic'
+        $g.DrawImage($src, (New-Object Drawing.Rectangle 0, 0, $w, $h), (New-Object Drawing.Rectangle $sx, $sy, $sw, $sh), 'Pixel')
+        $g.Dispose(); return $bmp
+    } finally { $src.Dispose() }
+}
+
+if ($ApplyPending) {
+    # Administrator 첫 로그인: 이전 계정 삭제 → 저장된 선택 적용 → 작업 정리
+    $pending = Join-Path $script:LWRoot 'pending-choices.json'
+    if (Test-Path $pending) {
+        $pc = Get-Content $pending -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($pc.HandoffFrom -and $pc.HandoffFrom -ne $env:USERNAME) {
+            try {
+                $u = Get-LocalUser -Name $pc.HandoffFrom -ErrorAction Stop
+                Get-CimInstance Win32_UserProfile | Where-Object { $_.SID -eq $u.SID.Value } | Remove-CimInstance -ErrorAction SilentlyContinue
+                Remove-LocalUser -Name $pc.HandoffFrom -ErrorAction Stop
+                Write-LWLog "이전 계정 '$($pc.HandoffFrom)' 삭제 (Administrator 하나만 사용)"
+            } catch { Write-LWLog "이전 계정 삭제 실패: $_" WARN }
+        }
+        $file = Join-Path $env:TEMP 'litewin-pending.json'
+        Copy-Item $pending $file -Force; Remove-Item $pending -Force
+        $FirstRun = $true
+        Show-ApplyProgress -ChoicesFile $file
+    }
+    Unregister-ScheduledTask -TaskPath '\LiteWin\' -TaskName 'LiteWin Admin Handoff' -Confirm:$false -ErrorAction SilentlyContinue
+    return
+}
+
 if ($FirstRun) {
     # 첫 로그인: 설치의 마지막 단계처럼 전체 화면 배경 위에서 묻는다. 적용이 끝나면 바탕화면이 나온다.
     $screen = [Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $light = $true
+    $pers = Get-RegValueEntry -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name 'AppsUseLightTheme'
+    if ($pers -and [int]$pers.Value -eq 0) { $light = $false }
     $back = New-Object Windows.Forms.Form
     $back.FormBorderStyle = 'None'; $back.StartPosition = 'Manual'; $back.Bounds = $screen
-    $back.ShowInTaskbar = $false; $back.BackColor = [Drawing.Color]::FromArgb(43, 47, 56)
-    $img = Join-Path $env:WINDIR 'Web\Wallpaper\LiteWin\wave_dark.jpg'
-    if (Test-Path $img) { try { $back.BackgroundImage = [Drawing.Image]::FromFile($img); $back.BackgroundImageLayout = 'Stretch' } catch { } }
+    $back.ShowInTaskbar = $false; $back.AutoScaleMode = 'None'
+    $back.BackColor = if ($light) { [Drawing.Color]::FromArgb(236, 234, 231) } else { [Drawing.Color]::FromArgb(43, 47, 56) }
+    $img = Join-Path $env:WINDIR ('Web\Wallpaper\LiteWin\wave_{0}.jpg' -f $(if ($light) { 'light' } else { 'dark' }))
+    if (Test-Path $img) { try { $back.BackgroundImage = New-CoverImage $img $screen.Width $screen.Height; $back.BackgroundImageLayout = 'None' } catch { } }
+    $fg  = if ($light) { [Drawing.Color]::FromArgb(32, 33, 36) } else { [Drawing.Color]::White }
+    $fg2 = if ($light) { [Drawing.Color]::FromArgb(80, 82, 88) } else { [Drawing.Color]::Gainsboro }
+
+    # 글자 크기와 위치를 화면 높이에 비례해서 정하고, 설정 창은 제목 아래 가운데에 둔다 (겹치지 않게)
+    $titleSize = [Math]::Max(16, [Math]::Min(30, [int]($screen.Height / 40)))
     $title = New-Object Windows.Forms.Label
     $title.Text = 'LiteWin 설정을 마무리합니다'; $title.AutoSize = $true; $title.BackColor = [Drawing.Color]::Transparent
-    $title.ForeColor = [Drawing.Color]::White; $title.Font = New-Object Drawing.Font('Malgun Gothic', 22)
-    $title.Location = New-Object Drawing.Point(60, 50)
+    $title.ForeColor = $fg; $title.Font = New-Object Drawing.Font('Malgun Gothic', $titleSize, [Drawing.FontStyle]::Bold, [Drawing.GraphicsUnit]::Pixel)
     $sub = New-Object Windows.Forms.Label
     $sub.Text = '원하는 방식을 고르세요. 나중에 시작 메뉴 > LiteWin 설정 에서 언제든 바꿀 수 있습니다.'; $sub.AutoSize = $true
-    $sub.BackColor = [Drawing.Color]::Transparent; $sub.ForeColor = [Drawing.Color]::Gainsboro
-    $sub.Font = New-Object Drawing.Font('Malgun Gothic', 11); $sub.Location = New-Object Drawing.Point(64, 105)
+    $sub.BackColor = [Drawing.Color]::Transparent; $sub.ForeColor = $fg2
+    $sub.Font = New-Object Drawing.Font('Malgun Gothic', [Math]::Max(12, [int]($titleSize * 0.55)), [Drawing.FontStyle]::Regular, [Drawing.GraphicsUnit]::Pixel)
     $back.Controls.AddRange(@($title, $sub))
-    $back.Show()
-    $form.StartPosition = 'CenterParent'
+    $layout = {
+        $top = [int]($screen.Height * 0.06)
+        $title.Location = New-Object Drawing.Point([int](($screen.Width - $title.PreferredWidth) / 2), $top)
+        $sub.Location = New-Object Drawing.Point([int](($screen.Width - $sub.PreferredWidth) / 2), $top + $title.PreferredHeight + 6)
+        $formTop = $sub.Bottom + [int]($screen.Height * 0.03)
+        if ($formTop + $form.Height -gt $screen.Height - 10) { $formTop = [Math]::Max($sub.Bottom + 6, $screen.Height - $form.Height - 10) }
+        $form.StartPosition = 'Manual'
+        $form.Location = New-Object Drawing.Point([int]($screen.X + ($screen.Width - $form.Width) / 2), [int]($screen.Y + $formTop))
+    }
+    $back.Show(); & $layout
     [void]$form.ShowDialog($back)
-    if ($script:ApplyProc) {
-        $title.Text = '적용하는 중입니다…'; $sub.Text = '끝나면 바탕화면이 나타납니다. 진행 상황은 가운데 창에 표시됩니다.'
-        while (-not $script:ApplyProc.HasExited) { [Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 200 }
+    if ($script:PendingFile) {
+        $title.Text = '적용하는 중입니다…'; $sub.Text = '끝나면 바탕화면이 나타납니다.'
+        & $layout
+        Show-ApplyProgress -ChoicesFile $script:PendingFile -Owner $back
     }
     $back.Close()
+    if ($script:LogoffAfter) { & "$env:WINDIR\System32\shutdown.exe" /l }
 } else {
     [void]$form.ShowDialog()
+    if ($script:PendingFile) { Show-ApplyProgress -ChoicesFile $script:PendingFile }
 }

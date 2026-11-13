@@ -109,6 +109,14 @@ function Save-VerifiedAsset {
     return $hash
 }
 
+function Test-EPBlockedByDefender {
+    <# Windows 보안(Defender)이 ExplorerPatcher 파일을 격리/차단했는지 (보호 기록) #>
+    try {
+        $d = Get-MpThreatDetection -ErrorAction Stop | Where-Object { "$($_.Resources)" -match 'ExplorerPatcher|ep_setup|dxgi\.dll' }
+        return [bool]$d
+    } catch { return $false }
+}
+
 function Install-EP {
     param([Parameter(Mandatory)][string]$Setup, [switch]$Update)
     $args2 = if ($Update) { '/update_silent' } else { '' }

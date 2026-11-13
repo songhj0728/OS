@@ -9,17 +9,17 @@
 . (Join-Path $PSScriptRoot 'LiteWin.Common.ps1')
 
 $script:LWBrowsers = [ordered]@{
-    chrome  = @{ Name = 'Google Chrome';   Winget = 'Google.Chrome';   Reg = 'Google Chrome'
+    chrome  = @{ Name = 'Google Chrome';   Winget = 'Google.Chrome';   Reg = 'Google Chrome'; Page = 'https://www.google.com/chrome/'
                  Exe = @("$env:ProgramFiles\Google\Chrome\Application\chrome.exe", "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe", "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe") }
-    edge    = @{ Name = 'Microsoft Edge';  Winget = 'Microsoft.Edge';  Reg = 'Microsoft Edge'
+    edge    = @{ Name = 'Microsoft Edge';  Winget = 'Microsoft.Edge';  Reg = 'Microsoft Edge'; Page = 'https://www.microsoft.com/edge/download'
                  Exe = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") }
-    brave   = @{ Name = 'Brave';           Winget = 'Brave.Brave';     Reg = 'Brave'
+    brave   = @{ Name = 'Brave';           Winget = 'Brave.Brave';     Reg = 'Brave'; Page = 'https://brave.com/download/'
                  Exe = @("$env:ProgramFiles\BraveSoftware\Brave-Browser\Application\brave.exe", "$env:LOCALAPPDATA\BraveSoftware\Brave-Browser\Application\brave.exe") }
-    whale   = @{ Name = '네이버 웨일';      Winget = 'Naver.Whale';     Reg = 'Naver Whale'
+    whale   = @{ Name = '네이버 웨일';      Winget = 'Naver.Whale';     Reg = 'Naver Whale'; Page = 'https://whale.naver.com/'
                  Exe = @("$env:ProgramFiles\Naver\Naver Whale\Application\whale.exe", "${env:ProgramFiles(x86)}\Naver\Naver Whale\Application\whale.exe", "$env:LOCALAPPDATA\Naver\Naver Whale\Application\whale.exe") }
-    opera   = @{ Name = 'Opera';           Winget = 'Opera.Opera';     Reg = 'Opera'
+    opera   = @{ Name = 'Opera';           Winget = 'Opera.Opera';     Reg = 'Opera'; Page = 'https://www.opera.com/download'
                  Exe = @("$env:ProgramFiles\Opera\opera.exe", "$env:LOCALAPPDATA\Programs\Opera\opera.exe", "$env:LOCALAPPDATA\Programs\Opera\launcher.exe") }
-    firefox = @{ Name = 'Mozilla Firefox'; Winget = 'Mozilla.Firefox'; Reg = 'Firefox'
+    firefox = @{ Name = 'Mozilla Firefox'; Winget = 'Mozilla.Firefox'; Reg = 'Firefox'; Page = 'https://www.mozilla.org/firefox/new/'
                  Exe = @("$env:ProgramFiles\Mozilla Firefox\firefox.exe", "${env:ProgramFiles(x86)}\Mozilla Firefox\firefox.exe") }
 }
 
@@ -61,7 +61,11 @@ function Install-LWBrowser([string]$Id) {
     Write-LWLog "브라우저 설치: $($b.Name)"
     $ok = Invoke-Winget -Id $b.Winget -Scope machine
     if (-not $ok) { $ok = Invoke-Winget -Id $b.Winget }   # 일부 브라우저는 사용자 범위 설치만 제공
-    return ($ok -and (Test-LWBrowserInstalled $Id))
+    if ($ok -and (Test-LWBrowserInstalled $Id)) { return $true }
+    # winget 으로 안 되면 공식 다운로드 페이지를 열어 직접 받게 한다 (기본 브라우저로 열림)
+    Write-LWLog "$($b.Name): 자동 설치 실패 → 공식 다운로드 페이지를 엽니다 ($($b.Page))" WARN
+    try { Start-Process $b.Page } catch { }
+    return $false
 }
 
 function Uninstall-LWBrowser([string]$Id) {
@@ -71,7 +75,8 @@ function Uninstall-LWBrowser([string]$Id) {
     Write-LWLog "브라우저 제거: $($b.Name)"
     $winget = Wait-Winget -TimeoutSeconds 30
     if ($winget) {
-        & $winget uninstall --id $b.Winget --exact --silent --accept-source-agreements --disable-interactivity | Out-Host
+        $r = Invoke-Hidden -File $winget -ArgumentList @('uninstall', '--id', $b.Winget, '--exact', '--silent', '--accept-source-agreements', '--disable-interactivity')
+        if ($r.Code -ne 0) { Write-LWLog "$($b.Name) 제거 실패 (코드 $($r.Code))" WARN }
     }
     return -not (Test-LWBrowserInstalled $Id)
 }
@@ -89,7 +94,7 @@ function Set-LWDefaultBrowser([string]$Id, [switch]$NoPrompt) {
         $entries = [ordered]@{}
         foreach ($e in $script:BrowserIdentifiers) { $entries[$e] = @($reg.ProgId, $b.Name) }
         Merge-DefaultAssociations -Source $src -Output $xml -Entries $entries
-        & dism.exe /Online /English "/Import-DefaultAppAssociations:$xml" | Out-Null
+        [void](Invoke-Hidden -File "$env:WINDIR\System32\dism.exe" -ArgumentList @('/Online', '/English', "/Import-DefaultAppAssociations:$xml"))
     } catch { Write-LWLog "새 계정 기본 브라우저 지정 실패: $_" WARN }
 
     # (2) 현재 사용자: Windows 기본 앱 화면을 열어 [기본값으로 설정] 을 누르게 한다
