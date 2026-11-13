@@ -15,6 +15,7 @@ $root = Split-Path -Parent $PSScriptRoot
 . (Join-Path $root 'lib\LiteWin.Apps.ps1')
 . (Join-Path $root 'lib\LiteWin.Components.ps1')
 . (Join-Path $root 'lib\LiteWin.Browsers.ps1')
+. (Join-Path $root 'lib\LiteWin.Theme.ps1')
 
 # 관리자 권한으로 다시 실행
 if (-not (Test-LWAdmin)) {
@@ -240,6 +241,42 @@ $kbWheel = Add-Check $p1 '마우스 휠 자연스러운 스크롤 (맥 방향)' 
 function Update-KeysEnabled { foreach ($cb in $kbCaps, $kbWord, $kbQuit, $kbF, $kbStdF, $kbGame, $kbWheel) { $cb.Enabled = -not $rbLite.Checked } }
 $rbMac.add_CheckedChanged({ Update-UiEnabled }); $rbLite.add_CheckedChanged({ Update-UiEnabled })
 $rbLite.add_CheckedChanged({ Update-KeysEnabled }); Update-KeysEnabled
+
+# ============================================================== 탭: 테마 (정품 인증 전에도 동작)
+$pT = New-Page '테마'
+[void](Add-Label $pT '배경화면과 다크/라이트 모드를 함께 바꿉니다. 고르면 바로 적용됩니다.')
+[void](Add-Label $pT '    Windows 정품 인증 전에는 설정 앱의 개인 설정이 잠기지만, 여기서는 인증과 관계없이 바꿀 수 있습니다.' $small $gray)
+$curTheme = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes' -ErrorAction SilentlyContinue).CurrentTheme
+$grid = New-Object Windows.Forms.FlowLayoutPanel
+$grid.AutoSize = $true; $grid.MaximumSize = New-Object Drawing.Size(570, 0); $grid.WrapContents = $true
+$grid.Margin = New-Object Windows.Forms.Padding(6, 8, 3, 3)
+$pT.Controls.Add($grid)
+foreach ($th in @(Get-LWThemes)) {
+    $cell = New-Object Windows.Forms.FlowLayoutPanel
+    $cell.FlowDirection = 'TopDown'; $cell.AutoSize = $true; $cell.Margin = New-Object Windows.Forms.Padding(6)
+    $pic = New-Object Windows.Forms.PictureBox
+    $pic.Size = New-Object Drawing.Size(168, 95); $pic.SizeMode = 'Zoom'; $pic.Cursor = 'Hand'
+    $pic.BorderStyle = if ($curTheme -and $curTheme -eq $th.File) { 'Fixed3D' } else { 'FixedSingle' }
+    if ($th.Wallpaper -and (Test-Path $th.Wallpaper)) {
+        try {
+            # 원본을 잠그지 않도록 작게 복사한 미리보기만 쓴다
+            $src = [Drawing.Image]::FromFile($th.Wallpaper); $pic.Image = $src.GetThumbnailImage(336, 190, $null, [IntPtr]::Zero); $src.Dispose()
+        } catch { }
+    }
+    $lab = New-Object Windows.Forms.Label
+    $lab.Text = $th.Name + $(if ($th.Dark) { '  ·  다크' } else { '  ·  라이트' }); $lab.AutoSize = $true
+    $cell.Controls.AddRange(@($pic, $lab)); $grid.Controls.Add($cell)
+    # 클로저(GetNewClosure)를 쓰면 이 스크립트의 함수(Set-LWTheme)가 보이지 않으므로, 테마 정보는 Tag 에 담는다
+    $pic.Tag = @{ Theme = $th; Pic = $pic }; $lab.Tag = $pic.Tag
+    $onPick = {
+        param($sender, $e)
+        $t = $sender.Tag
+        [void](Set-LWTheme -Theme $t.Theme)
+        foreach ($c in $grid.Controls) { $c.Controls[0].BorderStyle = 'FixedSingle' }
+        $t.Pic.BorderStyle = 'Fixed3D'
+    }
+    $pic.add_Click($onPick); $lab.add_Click($onPick)
+}
 
 # ============================================================== 탭 2: 사진·동영상
 $p2 = New-Page '사진·동영상'

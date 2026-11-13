@@ -174,3 +174,11 @@ jobs:
           if ($out -notmatch 'OperationStopped.*no-such\.iso') { Write-Host '::error::build script failed before the ISO check'; exit 1 }
           Write-Host 'preflight OK: script loaded up to the ISO check'
           exit 0   # 자식 powershell 의 종료 코드(1)가 이 단계 결과로 남지 않게
+
+      - name: Theme helper (parse .theme files, compile wallpaper API)
+        shell: powershell
+        run: |
+          . .\lib\LiteWin.Theme.ps1
+          $t = @(Get-LWThemes)
+          $t | ForEach-Object { Write-Host "$($_.Name) dark=$($_.Dark) wp=$($_.Wallpaper)" }
+          if (-not ('LiteWin.Desktop' -as [type])) { throw 'Desktop type missing' }
