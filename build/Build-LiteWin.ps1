@@ -433,6 +433,12 @@ try {
                     $found = @(Get-ChildItem (Join-Path $bootMount 'sources') -File -ErrorAction SilentlyContinue |
                                Where-Object { $_.Name -match '^background.*\.(bmp|png|jpg)$' })
                     Info ("[{0}] {1}: {2}" -f $bi.ImageIndex, $bi.ImageName, $(if ($found) { ($found.Name -join ', ') } else { '배경 파일 없음' }))
+                    if (-not $found) {
+                        # 진단용: 이 이미지 안의 큰 그림 파일 후보를 기록 (어느 파일이 설치 화면 배경인지 찾기 위해)
+                        $cands = Get-ChildItem (Join-Path $bootMount 'sources'), (Join-Path $bootMount 'Windows\System32') -File -ErrorAction SilentlyContinue |
+                                 Where-Object { $_.Extension -match '^\.(bmp|png|jpg)$' -and $_.Length -gt 20KB } | Select-Object -First 15
+                        foreach ($c in $cands) { Info ("    후보: {0} ({1:N0}KB)" -f $c.FullName.Substring($bootMount.Length), ($c.Length / 1KB)) }
+                    }
                     foreach ($f in $found) {
                         $tmpImg = Join-Path $tmpDir ("setupbg-{0}-{1}" -f $bi.ImageIndex, $f.Name)
                         $made = New-SolidImageLike -Template $f.FullName -Color $color -OutFile $tmpImg

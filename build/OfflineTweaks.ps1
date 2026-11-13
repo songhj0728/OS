@@ -81,6 +81,15 @@ $script:OfflineRegTweaks += @(
     @{ Hive='NTUSER'; Path='Software\ExplorerPatcher'; Name='UpdatePolicy'; Type='DWord'; Value=2 }
     # 새 계정 첫 로그인 때 적용할 테마 (OEM 방식) — LiteWin 라이트
     @{ Hive='SOFTWARE'; Path='Microsoft\Windows\CurrentVersion\Themes'; Name='InstallTheme'; Type='ExpandString'; Value='%SystemRoot%\resources\Themes\LiteWinLight.theme' }
+    # 새 계정이 처음 만들어질 때부터 이 배경 (테마 적용을 기다리지 않음 → 기본 배경이 보였다가 바뀌는 일 없음)
+    #   정품 인증 전에는 설정 앱에서 배경을 못 바꾸지만, 이 기본값은 그와 관계없이 적용된다. 사용자는 나중에 자유롭게 바꿀 수 있다.
+    @{ Hive='NTUSER'; Path='Control Panel\Desktop'; Name='Wallpaper'; Type='String'; Value='C:\Windows\Web\Wallpaper\LiteWin\wave_light.jpg' }
+    @{ Hive='NTUSER'; Path='Control Panel\Desktop'; Name='WallpaperStyle'; Type='String'; Value='10' }
+    @{ Hive='NTUSER'; Path='Control Panel\Desktop'; Name='TileWallpaper'; Type='String'; Value='0' }
+    @{ Hive='NTUSER'; Path='Software\Microsoft\Windows\CurrentVersion\Themes'; Name='CurrentTheme'; Type='String'; Value='C:\Windows\resources\Themes\LiteWinLight.theme' }
+    # Microsoft 계정으로 로그인해도 이 PC 계정이 Microsoft 계정으로 바뀌지 않게 (Store/앱에서는 '앱에만 로그인'으로 사용 가능)
+    #   1 = Microsoft 계정을 Windows 계정으로 추가하거나 전환할 수 없음
+    @{ Hive='SOFTWARE'; Path='Microsoft\Windows\CurrentVersion\Policies\System'; Name='NoConnectedUser'; Type='DWord'; Value=1 }
     # 설정 앱 '홈'(추천/계정 홍보) 페이지 숨김
     @{ Hive='SOFTWARE'; Path='Microsoft\Windows\CurrentVersion\Policies\Explorer'; Name='SettingsPageVisibility'; Type='String'; Value='hide:home' }
     # 로그인할 때마다 LiteWin 셸(클래식 작업표시줄/시작 메뉴/창 버튼) 적용
