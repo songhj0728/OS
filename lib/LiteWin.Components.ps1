@@ -117,8 +117,33 @@ function Test-EPBlockedByDefender {
     } catch { return $false }
 }
 
+function Add-EPDefenderExclusion {
+    <#
+        ExplorerPatcher 는 Windows 보안(Defender)이 오탐지해 설치를 조용히 막는 일이 있다 (사용자 요청으로 예외 추가).
+        관리자만 쓸 수 있는 위치 두 곳만 검사에서 제외한다 — 사용자 폴더(%APPDATA% 등)는 넣지 않는다.
+    #>
+    $paths = @("$env:ProgramFiles\ExplorerPatcher", "$env:WINDIR\dxgi.dll")
+    try {
+        $cur = @((Get-MpPreference -ErrorAction Stop).ExclusionPath)
+        $add = @($paths | Where-Object { $cur -notcontains $_ })
+        if ($add.Count) {
+            Add-MpPreference -ExclusionPath $add -ErrorAction Stop
+            Write-LWLog ("Windows 보안 검사 예외 추가: " + ($add -join ', ')) -File 'Components.log'
+        }
+        return $true
+    } catch {
+        Write-LWLog "Windows 보안 예외 추가 실패 (다른 백신 사용 또는 정책으로 막힘): $_" WARN -File 'Components.log'
+        return $false
+    }
+}
+
+function Remove-EPDefenderExclusion {
+    try { Remove-MpPreference -ExclusionPath "$env:ProgramFiles\ExplorerPatcher", "$env:WINDIR\dxgi.dll" -ErrorAction Stop } catch { }
+}
+
 function Install-EP {
     param([Parameter(Mandatory)][string]$Setup, [switch]$Update)
+    [void](Add-EPDefenderExclusion)
     $args2 = if ($Update) { '/update_silent' } else { '' }
     $p = if ($args2) { Start-Process $Setup -ArgumentList $args2 -Wait -PassThru } else { Start-Process $Setup -Wait -PassThru }
     Hide-LWComponentsFromApps

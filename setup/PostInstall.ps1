@@ -90,6 +90,13 @@ if (Test-Path $chromeMsi) {
 # ---------------------------------------------------------------- 내장 프로그램 (MPC-BE, ImageGlass, RetroBar, Open-Shell, AutoHotkey)
 $payloadDir = Join-Path $root 'payload'
 $payloadJson = Join-Path $payloadDir 'payloads.json'
+# ExplorerPatcher 를 설치하기 전에 Windows 보안 검사 예외를 둔다 (오탐지로 설치가 막히는 것 방지)
+if (Test-Path (Join-Path $payloadDir 'ep_setup.exe')) {
+    try {
+        Add-MpPreference -ExclusionPath "$env:ProgramFiles\ExplorerPatcher", "$env:WINDIR\dxgi.dll" -ErrorAction Stop
+        Log 'Windows 보안 검사 예외: Program Files\ExplorerPatcher, Windows\dxgi.dll'
+    } catch { Log "Windows 보안 예외 추가 실패: $_" }
+}
 if (Test-Path $payloadJson) {
     foreach ($pl in @(Get-Content $payloadJson -Raw -Encoding UTF8 | ConvertFrom-Json)) {
         if (-not $pl -or -not $pl.File) { continue }

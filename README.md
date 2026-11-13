@@ -66,7 +66,7 @@ Edge를 다시 쓰고 싶으면 LiteWin 설정 > 브라우저에서 체크를 �
   - 과거에 Microsoft가 ExplorerPatcher 설치 PC의 업그레이드를 막은 적이 있어서 넣은 기능입니다.
 - **자동 대체:** 업데이트 뒤 탐색기가 10분 안에 3번 이상 비정상 종료되면 RetroBar로 자동 전환합니다.
 - Windows 시스템 파일은 바꾸지 않으므로 매월 보안 업데이트에는 영향이 없습니다.
-- ExplorerPatcher는 과거 Microsoft Defender가 오탐지한 적이 있습니다. 설치가 막히면 `C:\ProgramData\LiteWin\logs\Components.log`를 확인하세요.
+- ExplorerPatcher는 Windows 보안(Defender)이 오탐지해 설치를 막은 적이 있어서, **관리자만 쓸 수 있는 두 위치(`C:\Program Files\ExplorerPatcher`, `C:\Windows\dxgi.dll`)만 검사 예외**로 둡니다. 사용자 폴더는 제외하지 않습니다. 예외를 없애려면 설정 > Windows 보안 > 바이러스 및 위협 방지 > 제외에서 지우세요.
 
 **LiteWin 셸 계층**
 - Windows의 작업표시줄과 시작 메뉴는 **지우지 않고 숨기기만** 합니다. 그래서 업데이트가 안전하고, Microsoft가 구버전 기능을 없애도 영향을 받지 않습니다.
