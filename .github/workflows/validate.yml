@@ -146,3 +146,27 @@ jobs:
           $t = $x.SelectSingleNode('//u:CustomDefaultThemeFile', $ns)
           if (-not $t -or $t.InnerText -notlike '*LiteWinLight.theme') { throw 'CustomDefaultThemeFile missing' }
           Write-Host "default theme: $($t.InnerText)"
+
+      - name: Setup background image (bmp/png templates keep size and format)
+        shell: powershell
+        run: |
+          . .\build\SetupBackground.ps1
+          $c = ConvertFrom-HexColor '#2B2F38'
+          $dir = Join-Path $env:RUNNER_TEMP 'bg'; New-Item -ItemType Directory $dir -Force | Out-Null
+          foreach ($ext in 'bmp', 'png') {
+            $tpl = Join-Path $dir "background_cli.$ext"
+            $b = New-Object System.Drawing.Bitmap 1024, 768; $b.Save($tpl, $(if ($ext -eq 'png') { [System.Drawing.Imaging.ImageFormat]::Png } else { [System.Drawing.Imaging.ImageFormat]::Bmp })); $b.Dispose()
+            $out = Join-Path $dir "out.$ext"
+            $r = New-SolidImageLike -Template $tpl -Color $c -OutFile $out
+            Remove-Item $tpl -ErrorAction Stop   # 템플릿이 잠기지 않았는지
+            $im = [System.Drawing.Image]::FromFile($out); $px = ([System.Drawing.Bitmap]$im).GetPixel(5, 5); $sz = $im.Size; $im.Dispose()
+            Write-Host "$ext -> $($sz.Width)x$($sz.Height) pixel=$($px.R),$($px.G),$($px.B)"
+            if ($sz.Width -ne 1024 -or $px.R -ne 0x2B -or $px.G -ne 0x2F -or $px.B -ne 0x38) { exit 1 }
+          }
+
+      - name: Build script preflight (loads every helper, stops at the missing-ISO check)
+        shell: powershell
+        run: |
+          $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build\Build-LiteWin.ps1 -IsoPath C:\no-such.iso -NoIso 2>&1 | Out-String
+          Write-Host $out
+          if ($out -notmatch 'ISO 파일이 없습니다') { Write-Host '::error::build script failed before the ISO check'; exit 1 }

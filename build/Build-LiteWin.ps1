@@ -73,6 +73,7 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'OfflineTweaks.ps1')
 . (Join-Path $PSScriptRoot 'OfflineEdge.ps1')
 . (Join-Path $PSScriptRoot 'OfflineRegAccess.ps1')
+. (Join-Path $PSScriptRoot 'SetupBackground.ps1')   # System.Drawing 도 여기서 불러온다
 . (Join-Path $RepoRoot 'lib\LiteWin.Common.ps1')
 . (Join-Path $RepoRoot 'lib\LiteWin.Assoc.ps1')
 . (Join-Path $RepoRoot 'lib\LiteWin.Components.ps1')
@@ -155,7 +156,21 @@ function Save-WingetPayloads([string]$Dest) {
 $sw = [Diagnostics.Stopwatch]::StartNew()
 function Step($msg)  { Write-Host ("`n[{0:mm\:ss}] == {1}" -f $sw.Elapsed, $msg) -ForegroundColor Cyan }
 function Info($msg)  { Write-Host "    $msg" }
-function Warn($msg)  { Write-Host "    ! $msg" -ForegroundColor Yellow }
+$script:BuildWarnings = New-Object System.Collections.Generic.List[string]
+function Warn($msg)  { Write-Host "    ! $msg" -ForegroundColor Yellow; $script:BuildWarnings.Add($msg) }
+
+# 빌드 기록: 화면에 나온 내용을 그대로 out\LiteWin-build.log 에 남긴다 (문제 생기면 이 파일 하나만 보내면 됨)
+$BuildLog = Join-Path $RepoRoot 'out\LiteWin-build.log'
+New-Item -ItemType Directory -Path (Split-Path $BuildLog) -Force | Out-Null
+try { Start-Transcript -Path $BuildLog -Force | Out-Null } catch { }
+function Write-BuildSummary([string]$result) {
+    Write-Host ''
+    if ($script:BuildWarnings.Count) {
+        Write-Host "== 경고 $($script:BuildWarnings.Count)개 ==" -ForegroundColor Yellow
+        $script:BuildWarnings | ForEach-Object { Write-Host "  - $_" -ForegroundColor Yellow }
+    }
+    Write-Host "== $result — 빌드 기록: $BuildLog ==" -ForegroundColor Cyan
+}
 
 # ============================================================== 0. 사전 점검
 if ($env:OS -ne 'Windows_NT') { throw 'Windows 에서 실행해야 합니다 (DISM 필요).' }
@@ -402,42 +417,40 @@ try {
     # ========================================================== 3-1. 설치 프로그램 배경
     #   빠른 빌드 캐시에는 원본 boot.wim 이 들어 있으므로, 매번 여기서 바꾼다 (색을 바꿔도 바로 반영)
     #   Windows 설치 화면 배경은 boot.wim 안 sources\background_*.bmp(또는 .png) 이다. 두 이미지(WinPE, Setup) 모두 확인한다.
-    if ($SetupBackground -match '^#?([0-9a-fA-F]{6})$') {
-        Step "설치 프로그램 배경색: #$($Matches[1])"
-        $rgb = [Convert]::ToInt32($Matches[1], 16)
-        $color = [System.Drawing.Color]::FromArgb(($rgb -shr 16) -band 255, ($rgb -shr 8) -band 255, $rgb -band 255)
-        $bootWim = Join-Path $isoDir 'sources\boot.wim'
-        $bootMount = Join-Path $WorkDir 'mountboot'
-        Add-Type -AssemblyName System.Drawing
-        $replaced = 0
-        foreach ($bi in @(Get-WindowsImage -ImagePath $bootWim | Sort-Object ImageIndex)) {
-            if (Test-Path $bootMount) { Remove-Item $bootMount -Recurse -Force -ErrorAction SilentlyContinue }
-            New-Item -ItemType Directory -Path $bootMount -Force | Out-Null
-            try {
-                Mount-WindowsImage -ImagePath $bootWim -Index $bi.ImageIndex -Path $bootMount | Out-Null
-                $found = @(Get-ChildItem (Join-Path $bootMount 'sources') -File -ErrorAction SilentlyContinue |
-                           Where-Object { $_.Name -match '^background.*\.(bmp|png|jpg)$' })
-                Info ("[{0}] {1}: {2}" -f $bi.ImageIndex, $bi.ImageName, $(if ($found) { ($found.Name -join ', ') } else { '배경 파일 없음' }))
-                foreach ($f in $found) {
-                    $size = try { $im = [System.Drawing.Image]::FromFile($f.FullName); $sz = $im.Size; $im.Dispose(); $sz } catch { New-Object System.Drawing.Size 1920, 1080 }
-                    $bmp = New-Object System.Drawing.Bitmap $size.Width, $size.Height, ([System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
-                    $g = [System.Drawing.Graphics]::FromImage($bmp); $g.Clear($color); $g.Dispose()
-                    $fmt = switch ($f.Extension.ToLower()) { '.png' { [System.Drawing.Imaging.ImageFormat]::Png } '.jpg' { [System.Drawing.Imaging.ImageFormat]::Jpeg } default { [System.Drawing.Imaging.ImageFormat]::Bmp } }
-                    $tmpImg = Join-Path $tmpDir ("setupbg-" + $f.Name)
-                    $bmp.Save($tmpImg, $fmt); $bmp.Dispose()
-                    & takeown.exe /F $f.FullName /A 2>&1 | Out-Null
-                    & icacls.exe $f.FullName /grant '*S-1-5-32-544:F' /C /Q 2>&1 | Out-Null
-                    Copy-Item $tmpImg $f.FullName -Force
-                    $replaced++
+    if ($SetupBackground) {
+        # 이 단계가 실패해도 빌드는 계속한다 (원래 설치 화면이 나올 뿐)
+        try {
+            $color = ConvertFrom-HexColor $SetupBackground
+            Step ("설치 프로그램 배경색: #{0:X2}{1:X2}{2:X2}" -f $color.R, $color.G, $color.B)
+            $bootWim = Join-Path $isoDir 'sources\boot.wim'
+            $bootMount = Join-Path $WorkDir 'mountboot'
+            $replaced = 0
+            foreach ($bi in @(Get-WindowsImage -ImagePath $bootWim | Sort-Object ImageIndex)) {
+                if (Test-Path $bootMount) { Remove-Item $bootMount -Recurse -Force -ErrorAction SilentlyContinue }
+                New-Item -ItemType Directory -Path $bootMount -Force | Out-Null
+                try {
+                    Mount-WindowsImage -ImagePath $bootWim -Index $bi.ImageIndex -Path $bootMount | Out-Null
+                    $found = @(Get-ChildItem (Join-Path $bootMount 'sources') -File -ErrorAction SilentlyContinue |
+                               Where-Object { $_.Name -match '^background.*\.(bmp|png|jpg)$' })
+                    Info ("[{0}] {1}: {2}" -f $bi.ImageIndex, $bi.ImageName, $(if ($found) { ($found.Name -join ', ') } else { '배경 파일 없음' }))
+                    foreach ($f in $found) {
+                        $tmpImg = Join-Path $tmpDir ("setupbg-{0}-{1}" -f $bi.ImageIndex, $f.Name)
+                        $made = New-SolidImageLike -Template $f.FullName -Color $color -OutFile $tmpImg
+                        & takeown.exe /F $f.FullName /A 2>&1 | Out-Null
+                        & icacls.exe $f.FullName /grant '*S-1-5-32-544:F' /C /Q 2>&1 | Out-Null
+                        Copy-Item $tmpImg $f.FullName -Force
+                        Info ("  - {0} ({1}x{2}) 교체" -f $f.Name, $made.Width, $made.Height)
+                        $replaced++
+                    }
+                    [GC]::Collect(); [GC]::WaitForPendingFinalizers()
+                    if ($found) { Dismount-WindowsImage -Path $bootMount -Save | Out-Null } else { Dismount-WindowsImage -Path $bootMount -Discard | Out-Null }
+                } catch {
+                    Warn "설치 프로그램 배경 변경 실패 ([$($bi.ImageIndex)]): $($_.Exception.Message)"
+                    Dismount-WindowsImage -Path $bootMount -Discard -ErrorAction SilentlyContinue | Out-Null
                 }
-                [GC]::Collect()
-                if ($found) { Dismount-WindowsImage -Path $bootMount -Save | Out-Null } else { Dismount-WindowsImage -Path $bootMount -Discard | Out-Null }
-            } catch {
-                Warn "설치 프로그램 배경 변경 실패 ([$($bi.ImageIndex)]): $($_.Exception.Message)"
-                Dismount-WindowsImage -Path $bootMount -Discard -ErrorAction SilentlyContinue | Out-Null
             }
-        }
-        if (-not $replaced) { Warn '설치 프로그램 배경 파일을 찾지 못했습니다 — 위 목록을 알려주세요' }
+            if (-not $replaced) { Warn '설치 프로그램 배경 파일을 찾지 못했습니다 — 위 [1]/[2] 줄을 알려주세요' }
+        } catch { Warn "설치 프로그램 배경 단계 건너뜀: $($_.Exception.Message)" }
     }
 
     # ========================================================== 4. 마운트
@@ -783,10 +796,12 @@ SCRNSAVE.EXE=
         } elseif (-not $KeepWorkDir) { Remove-Item $WorkDir -Recurse -Force -ErrorAction SilentlyContinue }
     }
     Step ("끝 (소요 {0:hh\:mm\:ss})" -f $sw.Elapsed)
+    Write-BuildSummary '성공'
 }
 catch {
     Write-Host "`n오류: $($_.Exception.Message)" -ForegroundColor Red
     Write-Host $_.ScriptStackTrace -ForegroundColor DarkGray
+    Write-BuildSummary '실패'
     throw
 }
 finally {
@@ -795,4 +810,5 @@ finally {
         Warn '오류로 중단 — 마운트된 이미지를 변경 없이 해제합니다'
         Dismount-WindowsImage -Path $mountDir -Discard -ErrorAction SilentlyContinue | Out-Null
     }
+    try { Stop-Transcript | Out-Null } catch { }
 }
