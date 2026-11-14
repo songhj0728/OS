@@ -16,6 +16,7 @@ $root = Split-Path -Parent $PSScriptRoot
 . (Join-Path $root 'lib\LiteWin.Components.ps1')
 . (Join-Path $root 'lib\LiteWin.Browsers.ps1')
 . (Join-Path $root 'lib\LiteWin.Theme.ps1')
+. (Join-Path $root 'lib\LiteWin.Activation.ps1')
 
 # 관리자 권한으로 다시 실행
 if (-not (Test-LWAdmin)) {
@@ -378,6 +379,32 @@ $p5.Controls.Add($btnCheck)
 [void](Add-Label $p5 '최근 기록' $bold $null 10)
 $hist = @($cst.History) | Select-Object -Last 8
 [void](Add-Label $p5 $(if ($hist) { $hist -join "`n" } else { '(아직 없음)' }) $small $gray)
+[void](Add-Label $p5 'Windows 정품 인증' $bold $null 12)
+$actSt = Get-LWActivationStatus
+$lblAct = Add-Label $p5 ("상태: {0}   {1}" -f $actSt.Text, $actSt.Key) $font $(if ($actSt.Activated) { [Drawing.Color]::SeaGreen } else { [Drawing.Color]::DarkOrange })
+[void](Add-Label $p5 '    "서버에 연결할 수 없음"은 대개 시계 어긋남, 네트워크 차단, 꺼진 서비스 때문입니다. VM 은 PC 의 디지털 라이선스를 쓰지 못하니 제품 키를 넣어야 합니다.' $small $gray)
+$actRow = New-Object Windows.Forms.FlowLayoutPanel; $actRow.AutoSize = $true; $actRow.WrapContents = $false
+$btnActFix = New-Object Windows.Forms.Button; $btnActFix.Text = '진단 및 복구 후 인증'; $btnActFix.AutoSize = $true
+$btnActKey = New-Object Windows.Forms.Button; $btnActKey.Text = '제품 키 입력…'; $btnActKey.AutoSize = $true
+$actRow.Controls.AddRange(@($btnActFix, $btnActKey)); $p5.Controls.Add($actRow)
+$btnActFix.add_Click({
+    $form.Cursor = 'WaitCursor'
+    try { $lines = Invoke-LWActivationRepair } finally { $form.Cursor = 'Default' }
+    $st2 = Get-LWActivationStatus
+    $lblAct.Text = "상태: $($st2.Text)   $($st2.Key)"
+    [Windows.Forms.MessageBox]::Show(($lines -join "`n"), 'Windows 정품 인증 진단') | Out-Null
+})
+$btnActKey.add_Click({
+    Add-Type -AssemblyName Microsoft.VisualBasic
+    $k = [Microsoft.VisualBasic.Interaction]::InputBox('본인 Windows 11 Pro 제품 키를 입력하세요 (XXXXX-XXXXX-XXXXX-XXXXX-XXXXX)', '제품 키 입력', '')
+    if (-not $k) { return }
+    $form.Cursor = 'WaitCursor'
+    try { $msg = Set-LWProductKey $k } finally { $form.Cursor = 'Default' }
+    $st2 = Get-LWActivationStatus
+    $lblAct.Text = "상태: $($st2.Text)   $($st2.Key)"
+    [Windows.Forms.MessageBox]::Show($msg, 'Windows 정품 인증') | Out-Null
+})
+
 function Save-ComponentOptions {
     $s2 = Get-LWComponentState
     $s2.AutoUpdate = $cbAuto.Checked; $s2.DelayDays = [int]$numDelay.Value

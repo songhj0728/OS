@@ -182,3 +182,12 @@ jobs:
           $t = @(Get-LWThemes)
           $t | ForEach-Object { Write-Host "$($_.Name) dark=$($_.Dark) wp=$($_.Wallpaper)" }
           if (-not ('LiteWin.Desktop' -as [type])) { throw 'Desktop type missing' }
+
+      - name: Activation diagnostics (read-only status + error text)
+        shell: powershell
+        run: |
+          . .\lib\LiteWin.Activation.ps1
+          $st = Get-LWActivationStatus
+          Write-Host "status: $($st.Text) channel=$($st.Channel)"
+          Write-Host (Get-ActivationErrorText 'error 0x80072F8F happened')
+          Write-Host "clock skew (min): $(Test-LWClock)"
