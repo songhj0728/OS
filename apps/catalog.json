@@ -1,110 +1,355 @@
 {
   "_comment": "LiteWin 앱 카탈로그. packages 의 source: winget | msstore. id 는 'winget show --id <id>' 로 확인 가능 (tools\\Test-Catalog.ps1). unavailable=true 는 목록에 회색으로만 표시.",
   "categories": [
-    { "id": "media",     "name": "사진·동영상 (추가 형식)", "description": "기본은 Windows 사진/미디어 플레이어. 더 많은 형식이 필요할 때만 선택" },
-    { "id": "gaming",    "name": "게임 플랫폼",            "description": "선택한 런처만 설치. 아무것도 고르지 않아도 됩니다" },
-    { "id": "community", "name": "커뮤니티·게이밍 브라우저", "description": "" },
-    { "id": "macui",     "name": "맥 스타일 UI 도구",       "description": "'맥 입력 + UI' 모드에서 사용" },
-    { "id": "drivers",   "name": "드라이버",               "description": "" }
+    {
+      "id": "media",
+      "name": "사진·동영상 (추가 형식)",
+      "description": "기본은 Windows 사진/미디어 플레이어. 더 많은 형식이 필요할 때만 선택"
+    },
+    {
+      "id": "gaming",
+      "name": "게임 플랫폼",
+      "description": "선택한 런처만 설치. 아무것도 고르지 않아도 됩니다"
+    },
+    {
+      "id": "community",
+      "name": "커뮤니티·게이밍 브라우저",
+      "description": ""
+    },
+    {
+      "id": "macui",
+      "name": "맥 스타일 UI 도구",
+      "description": "'맥 입력 + UI' 모드에서 사용"
+    },
+    {
+      "id": "drivers",
+      "name": "드라이버",
+      "description": ""
+    }
   ],
   "apps": [
     {
-      "id": "codec-pack", "category": "media", "name": "무료 코덱 확장 팩",
+      "id": "codec-pack",
+      "category": "media",
+      "name": "무료 코덱 확장 팩",
       "description": "VP9·AV1(webm, 유튜브 영상), HEIF(아이폰 .heic), 카메라 RAW, WebP, MPEG-2. 기본 사진/미디어 앱과 탐색기 미리보기 모두 지원. 상주 메모리 0",
       "packages": [
-        { "source": "msstore", "id": "9N4D0MSMP0PT", "name": "VP9 Video Extensions" },
-        { "source": "msstore", "id": "9MVZQVXJBQ9V", "name": "AV1 Video Extension" },
-        { "source": "msstore", "id": "9PMMSR1CGPWG", "name": "HEIF Image Extensions" },
-        { "source": "msstore", "id": "9NCTDW2W1BH8", "name": "Raw Image Extension" },
-        { "source": "msstore", "id": "9PG2DK419DRG", "name": "Webp Image Extensions" },
-        { "source": "msstore", "id": "9N95Q1ZZPMH4", "name": "MPEG-2 Video Extension" }
+        {
+          "source": "msstore",
+          "id": "9N4D0MSMP0PT",
+          "name": "VP9 Video Extensions"
+        },
+        {
+          "source": "msstore",
+          "id": "9MVZQVXJBQ9V",
+          "name": "AV1 Video Extension"
+        },
+        {
+          "source": "msstore",
+          "id": "9PMMSR1CGPWG",
+          "name": "HEIF Image Extensions"
+        },
+        {
+          "source": "msstore",
+          "id": "9NCTDW2W1BH8",
+          "name": "Raw Image Extension"
+        },
+        {
+          "source": "msstore",
+          "id": "9PG2DK419DRG",
+          "name": "Webp Image Extensions"
+        },
+        {
+          "source": "msstore",
+          "id": "9N95Q1ZZPMH4",
+          "name": "MPEG-2 Video Extension"
+        }
       ]
     },
     {
-      "id": "codec-hevc", "category": "media", "name": "HEVC(H.265) 비디오 확장 — 유료",
+      "id": "codec-hevc",
+      "category": "media",
+      "name": "HEVC(H.265) 비디오 확장 — 유료",
       "description": "Store 유료(약 1,000원). 선택하면 Store 구매 페이지를 엽니다. MPC-BE 를 쓰면 필요 없음",
       "storePage": "ms-windows-store://pdp/?ProductId=9NMZLZ57R3T7",
       "packages": []
     },
     {
-      "id": "imageglass", "category": "media", "name": "ImageGlass (고급 이미지 뷰어)",
+      "id": "imageglass",
+      "category": "media",
+      "name": "ImageGlass (고급 이미지 뷰어)",
       "description": "가볍고 80여 개 형식 지원, EXIF 정보 패널",
-      "packages": [ { "source": "winget", "id": "DuongDieuPhap.ImageGlass" } ]
-    },
-    {
-      "id": "mpc-be", "category": "media", "name": "MPC-BE (고급 동영상 플레이어)",
-      "description": "코덱 설치 없이 VP9·AV1·HEVC·10bit·HDR·MKV 재생, 한국어 지원",
-      "packages": [ { "source": "winget", "id": "MPC-BE.MPC-BE" } ]
-    },
-
-    {
-      "id": "xbox", "category": "gaming", "name": "Xbox (앱 + 게임 바 + Xbox 로그인)",
-      "description": "Game Pass, Xbox 계정이 필요한 PC 게임용. 필요 없으면 선택하지 마세요",
       "packages": [
-        { "source": "msstore", "id": "9MV0B5HZVK9Z", "name": "Xbox" },
-        { "source": "msstore", "id": "9NZKPSTSNW4P", "name": "Xbox Game Bar" },
-        { "source": "msstore", "id": "9WZDNCRD1HKW", "name": "Xbox Identity Provider" }
+        {
+          "source": "winget",
+          "id": "DuongDieuPhap.ImageGlass"
+        }
       ]
     },
-    { "id": "steam",     "category": "gaming", "name": "Steam",            "packages": [ { "source": "winget", "id": "Valve.Steam" } ] },
-    { "id": "epic",      "category": "gaming", "name": "Epic Games Launcher", "packages": [ { "source": "winget", "id": "EpicGames.EpicGamesLauncher" } ] },
-    { "id": "battlenet", "category": "gaming", "name": "Battle.net",       "packages": [ { "source": "winget", "id": "Blizzard.BattleNet" } ] },
-    { "id": "ea",        "category": "gaming", "name": "EA app",           "packages": [ { "source": "winget", "id": "ElectronicArts.EADesktop" } ] },
-    { "id": "ubisoft",   "category": "gaming", "name": "Ubisoft Connect",  "packages": [ { "source": "winget", "id": "Ubisoft.Connect" } ] },
-    { "id": "gog",       "category": "gaming", "name": "GOG Galaxy",       "packages": [ { "source": "winget", "id": "GOG.Galaxy" } ] },
     {
-      "id": "lol", "category": "gaming", "name": "리그 오브 레전드 (Riot Client 포함)",
-      "packages": [ { "source": "winget", "id": "RiotGames.LeagueOfLegends.KR" } ]
+      "id": "mpc-be",
+      "category": "media",
+      "name": "MPC-BE (고급 동영상 플레이어)",
+      "description": "코덱 설치 없이 VP9·AV1·HEVC·10bit·HDR·MKV 재생, 한국어 지원",
+      "packages": [
+        {
+          "source": "winget",
+          "id": "MPC-BE.MPC-BE"
+        }
+      ]
     },
     {
-      "id": "valorant", "category": "gaming", "name": "발로란트 (Riot Client + Vanguard)",
+      "id": "xbox",
+      "category": "gaming",
+      "name": "Xbox (앱 + 게임 바 + Xbox 로그인)",
+      "description": "Game Pass, Xbox 계정이 필요한 PC 게임용. 필요 없으면 선택하지 마세요",
+      "packages": [
+        {
+          "source": "msstore",
+          "id": "9MV0B5HZVK9Z",
+          "name": "Xbox"
+        },
+        {
+          "source": "msstore",
+          "id": "9NZKPSTSNW4P",
+          "name": "Xbox Game Bar"
+        },
+        {
+          "source": "msstore",
+          "id": "9WZDNCRD1HKW",
+          "name": "Xbox Identity Provider"
+        }
+      ]
+    },
+    {
+      "id": "steam",
+      "category": "gaming",
+      "name": "Steam",
+      "packages": [
+        {
+          "source": "winget",
+          "id": "Valve.Steam"
+        }
+      ]
+    },
+    {
+      "id": "epic",
+      "category": "gaming",
+      "name": "Epic Games Launcher",
+      "packages": [
+        {
+          "source": "winget",
+          "id": "EpicGames.EpicGamesLauncher"
+        }
+      ]
+    },
+    {
+      "id": "battlenet",
+      "category": "gaming",
+      "name": "Battle.net",
+      "packages": [
+        {
+          "source": "winget",
+          "id": "Blizzard.BattleNet"
+        }
+      ]
+    },
+    {
+      "id": "ea",
+      "category": "gaming",
+      "name": "EA app",
+      "packages": [
+        {
+          "source": "winget",
+          "id": "ElectronicArts.EADesktop"
+        }
+      ]
+    },
+    {
+      "id": "ubisoft",
+      "category": "gaming",
+      "name": "Ubisoft Connect",
+      "packages": [
+        {
+          "source": "winget",
+          "id": "Ubisoft.Connect"
+        }
+      ]
+    },
+    {
+      "id": "gog",
+      "category": "gaming",
+      "name": "GOG Galaxy",
+      "packages": [
+        {
+          "source": "winget",
+          "id": "GOG.Galaxy"
+        }
+      ]
+    },
+    {
+      "id": "lol",
+      "category": "gaming",
+      "name": "리그 오브 레전드 (Riot Client 포함)",
+      "packages": [
+        {
+          "source": "winget",
+          "id": "RiotGames.LeagueOfLegends.KR"
+        }
+      ]
+    },
+    {
+      "id": "valorant",
+      "category": "gaming",
+      "name": "발로란트 (Riot Client + Vanguard)",
       "description": "Vanguard 안티치트는 TPM 2.0 + 보안 부팅 필수",
       "requiresTpm": true,
-      "packages": [ { "source": "winget", "id": "RiotGames.Valorant.AP" } ]
+      "packages": [
+        {
+          "source": "winget",
+          "id": "RiotGames.Valorant.AP"
+        }
+      ]
     },
-    { "id": "rockstar",  "category": "gaming", "name": "Rockstar Games Launcher", "packages": [ { "source": "winget", "id": "RockstarGames.Launcher" } ] },
-    { "id": "minecraft", "category": "gaming", "name": "Minecraft Launcher", "packages": [ { "source": "winget", "id": "Mojang.MinecraftLauncher" } ] },
     {
-      "id": "playnite", "category": "gaming", "name": "Playnite (런처 통합 관리, 오픈소스)",
+      "id": "rockstar",
+      "category": "gaming",
+      "name": "Rockstar Games Launcher",
+      "packages": [
+        {
+          "source": "winget",
+          "id": "RockstarGames.Launcher"
+        }
+      ]
+    },
+    {
+      "id": "minecraft",
+      "category": "gaming",
+      "name": "Minecraft Launcher",
+      "packages": [
+        {
+          "source": "winget",
+          "id": "Mojang.MinecraftLauncher"
+        }
+      ]
+    },
+    {
+      "id": "playnite",
+      "category": "gaming",
+      "name": "Playnite (런처 통합 관리, 오픈소스)",
       "description": "여러 런처의 게임을 한 화면에서 실행",
-      "packages": [ { "source": "winget", "id": "Playnite.Playnite" } ]
+      "packages": [
+        {
+          "source": "winget",
+          "id": "Playnite.Playnite"
+        }
+      ]
     },
-
-    { "id": "discord", "category": "community", "name": "Discord", "packages": [ { "source": "winget", "id": "Discord.Discord" } ] },
     {
-      "id": "discord-phoenix", "category": "community", "name": "Discord Phoenix (Rust 네이티브, 베타)",
+      "id": "discord",
+      "category": "community",
+      "name": "Discord",
+      "packages": [
+        {
+          "source": "winget",
+          "id": "Discord.Discord"
+        }
+      ]
+    },
+    {
+      "id": "discord-phoenix",
+      "category": "community",
+      "name": "Discord Phoenix (Rust 네이티브, 베타)",
       "description": "Discord 가 Electron 대신 Rust 로 다시 만든 공식 클라이언트(메모리 약 300MB 수준). 공개 베타 배포 경로가 확인되면 packages 를 채우면 활성화됩니다",
       "unavailable": true,
       "packages": []
     },
-    { "id": "operagx", "category": "community", "name": "Opera GX", "packages": [ { "source": "winget", "id": "Opera.OperaGX" } ] },
-
     {
-      "id": "seelen", "category": "macui", "name": "Seelen UI — 맥식 상단 메뉴바 + Dock (권장)",
-      "description": "오픈소스(AGPL-3.0). 화면 위 메뉴바(시계·배터리·와이파이·미디어)와 아래 Dock 으로 Windows 작업표시줄을 대신합니다. 맥 UI 모드일 때만 실행",
-      "packages": [ { "source": "winget", "id": "Seelen.SeelenUI" } ]
+      "id": "operagx",
+      "category": "community",
+      "name": "Opera GX",
+      "packages": [
+        {
+          "source": "winget",
+          "id": "Opera.OperaGX"
+        }
+      ]
     },
     {
-      "id": "quicklook", "category": "macui", "name": "QuickLook (스페이스바 미리보기)",
+      "id": "seelen",
+      "category": "macui",
+      "name": "Seelen UI — 위쪽 메뉴바 + Dock (무료)",
+      "description": "오픈소스(AGPL-3.0). 화면 위 메뉴바(시계·배터리·와이파이·미디어)와 아래 Dock. 맥 UI 모드에서 Dock·메뉴바 도구로 고르면 그때만 실행",
+      "packages": [
+        {
+          "source": "winget",
+          "id": "Seelen.SeelenUI"
+        }
+      ]
+    },
+    {
+      "id": "mydockfinder",
+      "category": "macui",
+      "name": "MyDockFinder — 가장 맥과 비슷한 Dock + 메뉴바 (유료, Steam)",
+      "description": "맥식 Dock(확대·애니메이션), 위쪽 메뉴바, Launchpad. 유료라 Steam 에서 직접 구매·설치해야 합니다. 설치되어 있으면 맥 UI 모드에서 켜고 끕니다",
+      "storePage": "https://store.steampowered.com/app/1787090/MyDockFinder/",
+      "packages": []
+    },
+    {
+      "id": "nexus",
+      "category": "macui",
+      "name": "Nexus Dock — 확대 효과 Dock (무료, 개인용)",
+      "description": "Winstep 의 오래된 Dock 프로그램. 위쪽 메뉴바는 없고, 쓰는 동안 Windows 작업표시줄은 자동으로 숨깁니다. 회사에서 쓰려면 유료 라이선스",
+      "packages": [
+        {
+          "source": "winget",
+          "id": "WinStep.Nexus"
+        }
+      ]
+    },
+    {
+      "id": "quicklook",
+      "category": "macui",
+      "name": "QuickLook (스페이스바 미리보기)",
       "description": "탐색기에서 파일 선택 후 Space 로 미리보기 (맥 Quick Look)",
       "startupMatch": "QuickLook.exe",
-      "packages": [ { "source": "winget", "id": "QL-Win.QuickLook" } ]
+      "packages": [
+        {
+          "source": "winget",
+          "id": "QL-Win.QuickLook"
+        }
+      ]
     },
     {
-      "id": "flow", "category": "macui", "name": "Flow Launcher (Spotlight 대체)",
+      "id": "flow",
+      "category": "macui",
+      "name": "Flow Launcher (Spotlight 대체)",
       "description": "⌘Space 로 앱/파일/계산 검색. 선택하면 ⌘Space 가 Windows 검색 대신 Flow Launcher 를 엽니다",
       "startupMatch": "Flow.Launcher.exe",
-      "packages": [ { "source": "winget", "id": "Flow-Launcher.Flow-Launcher" } ]
+      "packages": [
+        {
+          "source": "winget",
+          "id": "Flow-Launcher.Flow-Launcher"
+        }
+      ]
     },
     {
-      "id": "windhawk", "category": "macui", "name": "Windhawk (작업표시줄 Dock 스타일, 고급)",
+      "id": "windhawk",
+      "category": "macui",
+      "name": "Windhawk (작업표시줄 Dock 스타일, 고급)",
       "description": "설치 후 Windhawk 에서 'Windows 11 Taskbar Styler' 모드를 직접 추가해 Dock 테마를 고르세요 (docs\\mac-ui.md)",
       "service": "Windhawk",
-      "packages": [ { "source": "winget", "id": "RamenSoftware.Windhawk" } ]
+      "packages": [
+        {
+          "source": "winget",
+          "id": "RamenSoftware.Windhawk"
+        }
+      ]
     },
-
     {
-      "id": "gpu-driver", "category": "drivers", "name": "그래픽 드라이버 (자동 감지)",
+      "id": "gpu-driver",
+      "category": "drivers",
+      "name": "그래픽 드라이버 (자동 감지)",
       "description": "NVIDIA / AMD / Intel 을 감지해 제조사 공식 드라이버 다운로드 페이지를 엽니다",
       "action": "gpu-driver",
       "packages": []

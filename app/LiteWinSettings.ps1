@@ -13,6 +13,7 @@ param([switch]$FirstRun, [switch]$ApplyPending)
 $root = Split-Path -Parent $PSScriptRoot
 . (Join-Path $root 'lib\LiteWin.Common.ps1')
 . (Join-Path $root 'lib\LiteWin.Apps.ps1')
+. (Join-Path $root 'lib\LiteWin.Shell.ps1')
 . (Join-Path $root 'lib\LiteWin.Components.ps1')
 . (Join-Path $root 'lib\LiteWin.Browsers.ps1')
 . (Join-Path $root 'lib\LiteWin.Theme.ps1')
@@ -303,15 +304,24 @@ $shStart = Add-Check $p1 '클래식 시작 메뉴' ([bool](Get-ShellOpt 'Classic
 $cbStart = New-Combo $p1 @('Windows 7 스타일 (Open-Shell)', 'Windows 10 스타일 (ExplorerPatcher)') $(if ((Get-ShellOpt 'StartEngine' 'openshell') -eq 'ep') { 1 } else { 0 })
 $shLabels = Add-Check $p1 '작업표시줄 단추 펼쳐 보기 (프로그램 이름 표시, 묶지 않기)' ([bool](Get-ShellOpt 'TaskbarLabels' $false)) 24
 $rbUi   = Add-Radio $p1 '맥 입력 + UI 스타일' ($curMode -eq 'MacUI')
-[void](Add-Label $p1 '    맥 입력 + Dock(가운데 작업표시줄) + 아래에서 고른 화면 스타일' $small $gray)
+[void](Add-Label $p1 '    맥 입력 + Dock·메뉴바 + 아래에서 고른 화면 스타일' $small $gray)
+$macEngLabel = Add-Label $p1 '    Dock · 메뉴바 도구' $small $gray
+# 순서 = $script:MacEngines
+$script:MacEngines = @('seelen', 'mydockfinder', 'nexus', 'none')
+$cbMacEngine = New-Combo $p1 @(
+    'Seelen UI — 무료, 위쪽 메뉴바 + Dock (자동 설치)',
+    'MyDockFinder — 가장 맥과 비슷함, 유료 (Steam 에서 직접 구매)',
+    'Nexus Dock — 무료, Dock 만 (작업표시줄은 자동 숨김)',
+    '사용 안 함 — Windows 작업표시줄 가운데 정렬'
+) ([Math]::Max(0, $script:MacEngines.IndexOf("$(Get-ShellOpt 'MacEngine' $(if ($state.UiOptions -and $curUi -notcontains 'seelen') { 'none' } else { 'seelen' }))"))) 27
 
 $uiChecks = [ordered]@{}
 $uiChecks['DarkMode']        = Add-Check $p1 '다크 모드' ($curUi -contains 'DarkMode') 24
 $uiChecks['AutoHideTaskbar'] = Add-Check $p1 '작업표시줄 자동 숨기기 (Dock 처럼)' ($curUi -contains 'AutoHideTaskbar') 24
 $uiChecks['Transparency']    = Add-Check $p1 '투명 효과' ($curUi -contains 'Transparency') 24
-foreach ($id in 'seelen', 'quicklook', 'flow', 'windhawk') {
+foreach ($id in 'quicklook', 'flow', 'windhawk') {
     $app = $catalog.apps | Where-Object id -eq $id
-    $uiChecks[$id] = Add-Check $p1 ($app.name + '  — 설치 필요') ($curUi -contains $id -or ($id -eq 'seelen' -and -not $state.UiOptions)) 24
+    $uiChecks[$id] = Add-Check $p1 ($app.name + '  — 설치 필요') ($curUi -contains $id) 24
 }
 $capLabel = Add-Label $p1 '    창 버튼 (모든 창 왼쪽 위에 맥식 버튼 추가, 원래 버튼은 그대로)' $small $gray
 $cbCaption = New-Object Windows.Forms.ComboBox
@@ -322,7 +332,7 @@ $cbCaption.SelectedIndex = switch (Get-ShellOpt 'Caption' 'traffic') { 'off' { 0
 $p1.Controls.Add($cbCaption)
 function Update-UiEnabled {
     foreach ($cb in $uiChecks.Values) { $cb.Enabled = $rbUi.Checked }
-    $cbCaption.Enabled = $rbUi.Checked
+    $cbCaption.Enabled = $rbUi.Checked; $cbMacEngine.Enabled = $rbUi.Checked
     foreach ($c in $shBar, $shStart, $shLabels, $cbEngine, $cbStart) { $c.Enabled = -not $rbUi.Checked }
 }
 $rbUi.add_CheckedChanged({ Update-UiEnabled }); Update-UiEnabled
@@ -571,7 +581,17 @@ function Start-Apply([bool]$installApps) {
         foreach ($k in $appChecks.Keys) { if ($appChecks[$k].Checked -and $appChecks[$k].Enabled) { $apps += $k } }
     }
     # 맥 UI 도구를 켰는데 설치 목록에 없으면 함께 설치
-    foreach ($id in 'seelen', 'quicklook', 'flow', 'windhawk') { if ($ui -contains $id -and $apps -notcontains $id) { $apps += $id } }
+    foreach ($id in 'quicklook', 'flow', 'windhawk') { if ($ui -contains $id -and $apps -notcontains $id) { $apps += $id } }
+    # Dock · 메뉴바 도구: 무료 도구는 없으면 함께 설치, MyDockFinder 는 유료라 Steam 페이지만 연다
+    $macEngine = $script:MacEngines[[Math]::Max(0, $cbMacEngine.SelectedIndex)]
+    if ($mode -eq 'MacUI') {
+        if ($macEngine -eq 'seelen' -and -not (Get-SeelenApp) -and $apps -notcontains 'seelen') { $apps += 'seelen' }
+        if ($macEngine -eq 'nexus' -and -not (Get-NexusExe) -and $apps -notcontains 'nexus') { $apps += 'nexus' }
+        if ($macEngine -eq 'mydockfinder' -and -not (Get-MyDockFinderExe)) {
+            $m = "MyDockFinder 는 유료 프로그램이라 LiteWin 이 대신 설치할 수 없습니다.`n`nSteam 에서 구매·설치한 뒤 LiteWin 설정에서 [적용] 을 다시 누르면 맥 UI 모드와 함께 켜집니다.`n그 전까지는 Windows 작업표시줄(가운데)을 씁니다.`n`nSteam 페이지를 열까요?"
+            if ([Windows.Forms.MessageBox]::Show($m, 'MyDockFinder', 'YesNo', 'Information') -eq 'Yes') { Start-Process $script:MyDockFinderStore }
+        }
+    }
 
     $choices = [ordered]@{
         Mode = $mode; UiOptions = $ui; Apps = $apps; FirstRun = [bool]$FirstRun
@@ -580,7 +600,7 @@ function Start-Apply([bool]$installApps) {
                   MacFKeys = $kbF.Checked; StandardFKeys = $kbStdF.Checked; GameAutoOff = $kbGame.Checked }
         Shell = @{ ClassicTaskbar = $shBar.Checked; ClassicStart = $shStart.Checked; TaskbarLabels = $shLabels.Checked
                    ClassicEngine = @('ep', 'retrobar')[$cbEngine.SelectedIndex]; StartEngine = @('openshell', 'ep')[$cbStart.SelectedIndex]
-                   Caption = @('off', 'traffic', 'fullscreen')[$cbCaption.SelectedIndex] }
+                   Caption = @('off', 'traffic', 'fullscreen')[$cbCaption.SelectedIndex]; MacEngine = $macEngine }
         RemoveEdge = -not $br.Edge; EdgeRedirect = $cbRedir.Checked
         Browsers = @{ Install = $br.Install; Remove = $br.Remove; Default = $br.Default }
     }

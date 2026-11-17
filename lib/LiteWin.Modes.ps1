@@ -46,7 +46,7 @@ function Set-TaskbarAutoHide([bool]$On) {
 # ------------------------------------------------------------------ 앱 시작 프로그램 켜고 끄기
 function Set-AppStartupState {
     <# Run 항목 중 실행 파일 이름이 $Match 인 것을 '시작 프로그램' 사용/사용 안 함 (작업 관리자와 같은 방식) #>
-    param([Parameter(Mandatory)][string]$Match, [bool]$Enabled)
+    param([Parameter(Mandatory)][string]$Match, [bool]$Enabled, [switch]$NoStop)
     $pairs = @(
         @{ Run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'; Approved = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run' }
         @{ Run = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'; Approved = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run' }
@@ -67,6 +67,7 @@ function Set-AppStartupState {
         }
     }
     $procName = [IO.Path]::GetFileNameWithoutExtension($Match)
+    if ($NoStop) { return [bool]$found }   # 시작 프로그램 등록만 바꾸고 실행 중인 프로그램은 그대로
     if ($Enabled) {
         if ($found -and -not (Get-Process $procName -ErrorAction SilentlyContinue)) {
             # Run 값은 "경로" 인자 형태 → cmd 로 그대로 실행

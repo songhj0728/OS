@@ -1,7 +1,7 @@
 ﻿<#
     LiteWin 셸 계층: 모드별로 화면 껍데기를 켜고 끈다.
       라이트 / 맥 입력 : 클래식 작업표시줄(ExplorerPatcher Win10, 예비 RetroBar) + Win7/Win10 시작 메뉴
-      맥 입력 + UI     : Win11 작업표시줄(가운데) + Windhawk Dock(선택) + 창 버튼 오버레이(LiteWinCaption)
+      맥 입력 + UI     : Dock·메뉴바 도구(Seelen UI / MyDockFinder / Nexus Dock 중 선택) + 창 버튼 오버레이(LiteWinCaption)
     Windows 쪽 작업표시줄/시작 메뉴는 지우지 않고 그대로 둔다(업데이트 안전). RetroBar 가 실행되면 자동으로 숨는다.
     로그인 시 app\Start-LiteWinShell.ps1 이 Start-LWShell 을 호출해 다시 적용한다 → 재부팅/로그아웃 후에도 유지.
 #>
@@ -28,9 +28,14 @@ function Get-LWShellOptions {
     <# 상태 파일의 Shell 옵션 + 기본값 #>
     param($State = (Get-LWState))
     # ClassicEngine: ep = ExplorerPatcher Win10 작업표시줄 / retrobar,  StartEngine: openshell = Win7 / ep = Win10
-    $o = [ordered]@{ ClassicTaskbar = $true; ClassicEngine = 'ep'; ClassicStart = $true; StartEngine = 'openshell'; TaskbarLabels = $false; Caption = 'traffic' }
+    # MacEngine: seelen / mydockfinder / nexus / none (맥 UI 의 Dock·메뉴바 도구)
+    $o = [ordered]@{ ClassicTaskbar = $true; ClassicEngine = 'ep'; ClassicStart = $true; StartEngine = 'openshell'; TaskbarLabels = $false; Caption = 'traffic'; MacEngine = $null }
     if ($State.Shell) {
         foreach ($p in $State.Shell.PSObject.Properties) { $o[$p.Name] = $p.Value }
+    }
+    if (-not $o.MacEngine) {
+        # 예전 버전: Seelen 을 UI 옵션 체크박스로 켰다
+        $o.MacEngine = if ($State.UiOptions -and @($State.UiOptions) -notcontains 'seelen') { 'none' } else { 'seelen' }
     }
     return [pscustomobject]$o
 }
@@ -131,6 +136,61 @@ function Set-SeelenState([bool]$On) {
     return $true
 }
 
+# ------------------------------------------------------------------ MyDockFinder (유료, Steam 앱 1787090) / Nexus Dock (무료)
+$script:MyDockFinderStore = 'https://store.steampowered.com/app/1787090/MyDockFinder/'
+$script:DockProcessNames = @{
+    mydockfinder = @('dock_64', 'dock', 'Dockmod64', 'Dockmod')
+    nexus        = @('Nexus', 'WinstepNexus')
+}
+
+function Get-SteamLibraryPaths {
+    $paths = @()
+    $steam = (Get-ItemProperty 'HKCU:\Software\Valve\Steam' -ErrorAction SilentlyContinue).SteamPath
+    if (-not $steam) { $steam = (Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Valve\Steam' -ErrorAction SilentlyContinue).InstallPath }
+    if ($steam) {
+        $steam = $steam -replace '/', '\'
+        $paths += $steam
+        $vdf = Join-Path $steam 'steamapps\libraryfolders.vdf'
+        if (Test-Path $vdf) {
+            foreach ($m in [regex]::Matches((Get-Content $vdf -Raw), '"path"\s+"([^"]+)"')) { $paths += ($m.Groups[1].Value -replace '\\\\', '\') }
+        }
+    }
+    $paths += "${env:ProgramFiles(x86)}\Steam"
+    return @($paths | Select-Object -Unique)
+}
+
+function Get-MyDockFinderExe {
+    foreach ($lib in Get-SteamLibraryPaths) {
+        foreach ($n in 'dock_64.exe', 'dock.exe') {
+            $p = Join-Path $lib "steamapps\common\MyDockFinder\$n"
+            if (Test-Path $p) { return $p }
+        }
+    }
+    return $null
+}
+
+function Get-NexusExe {
+    foreach ($p in "${env:ProgramFiles(x86)}\Winstep\Nexus.exe", "$env:ProgramFiles\Winstep\Nexus.exe", "$env:LOCALAPPDATA\Programs\Winstep\Nexus.exe") {
+        if (Test-Path $p) { return $p }
+    }
+    return $null
+}
+
+function Set-DockToolState {
+    <# 외부 Dock 도구 켜고 끄기. 자체 '시작 시 실행'은 끄고 LiteWin 셸이 맥 UI 모드일 때만 띄운다 #>
+    param([ValidateSet('mydockfinder', 'nexus')][string]$Tool, [bool]$On)
+    $exe = if ($Tool -eq 'mydockfinder') { Get-MyDockFinderExe } else { Get-NexusExe }
+    if (-not $exe) { return $false }
+    try { [void](Set-AppStartupState -Match (Split-Path $exe -Leaf) -Enabled $false -NoStop) } catch { }
+    $running = Get-Process -Name $script:DockProcessNames[$Tool] -ErrorAction SilentlyContinue
+    if ($On -and -not $running) {
+        if ($Tool -eq 'mydockfinder') { Start-Process $exe -WorkingDirectory (Split-Path $exe) }
+        else { Start-Process $exe }
+    }
+    if (-not $On -and $running) { $running | Stop-Process -Force -ErrorAction SilentlyContinue }
+    return $true
+}
+
 function Test-EPInstalled {
     Test-Path "$env:ProgramFiles\ExplorerPatcher\ExplorerPatcher.amd64.dll"
 }
@@ -223,9 +283,14 @@ function Start-LWShell {
         }
     }
 
-    # ---- 맥 UI: Seelen UI (상단 메뉴바 + Dock) ----
-    $wantSeelen = $mac -and (@($State.UiOptions) -contains 'seelen')
-    [void](Set-SeelenState $wantSeelen)
+    # ---- 맥 UI: Dock · 메뉴바 도구 (하나만 켠다) ----
+    $dock = if ($mac) { "$($o.MacEngine)" } else { 'none' }
+    if ($dock -eq 'mydockfinder' -and -not (Get-MyDockFinderExe)) { Write-LWLog 'MyDockFinder 가 설치되어 있지 않아 Windows 작업표시줄을 씁니다 (Steam 에서 구매·설치)' WARN; $dock = 'none' }
+    [void](Set-SeelenState ($dock -eq 'seelen'))
+    [void](Set-DockToolState -Tool 'mydockfinder' -On ($dock -eq 'mydockfinder'))
+    [void](Set-DockToolState -Tool 'nexus' -On ($dock -eq 'nexus'))
+    # Nexus 는 Dock 만 있으므로 Windows 작업표시줄을 자동 숨김으로 (맥 UI 를 끄면 스냅샷 복원으로 원래대로)
+    if ($Apply -and $dock -eq 'nexus' -and (Get-Command Set-TaskbarAutoHide -ErrorAction SilentlyContinue)) { Set-TaskbarAutoHide $true }
 
     # ---- 창 버튼 오버레이 ----
     $capOn = $mac -and $o.Caption -in 'traffic', 'fullscreen'

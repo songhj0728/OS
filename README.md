@@ -46,7 +46,7 @@ Edge를 다시 쓰고 싶으면 LiteWin 설정 > 브라우저에서 Edge를 체�
 |---|---|---|
 | **라이트 윈도우 (기본)** | 일반 Windows | **클래식**: Windows 10 작업표시줄(ExplorerPatcher) 또는 Win95~7 작업표시줄(RetroBar) + Win7 시작 메뉴(Open-Shell) 또는 Win10 시작 메뉴 |
 | 맥 입력 | ⌘/⌥, Caps Lock=한/영, **맥 F열**, 볼륨 12단계, 마우스 가속, 휠 방향, 트랙패드 | 클래식 (라이트와 같음) |
-| 맥 입력 + UI | 맥 입력과 같음 | **Seelen UI**의 맥식 상단 메뉴바 + Dock, **모든 창에 맥식 창 버튼(신호등)**, 다크 모드·투명 효과, QuickLook·Flow Launcher(선택) |
+| 맥 입력 + UI | 맥 입력과 같음 | **Dock·메뉴바 도구**(아래 표에서 선택), **모든 창에 맥식 창 버튼(신호등)**, 다크 모드·투명 효과, QuickLook·Flow Launcher(선택) |
 
 - 모드를 바꾸면 그 자리에서 대부분 적용되고, **재부팅(또는 로그아웃)하면 완전히 반영**됩니다.
 - 로그인할 때마다 LiteWin 셸이 현재 모드를 다시 적용합니다.
@@ -59,7 +59,7 @@ Edge를 다시 쓰고 싶으면 LiteWin 설정 > 브라우저에서 Edge를 체�
 | 스타일 | 작업표시줄 | 시작 메뉴 |
 |---|---|---|
 | 클래식 (라이트 / 맥 입력) | **Windows 10 스타일 (ExplorerPatcher, 기본)** 또는 Windows 95~7 스타일 (RetroBar) | Windows 7 스타일 (Open-Shell) 또는 Windows 10 스타일 (ExplorerPatcher) |
-| 맥 (맥 입력 + UI) | Seelen UI 상단 메뉴바 + 하단 Dock | Seelen UI / Windows 기본 |
+| 맥 (맥 입력 + UI) | 아래 Dock·메뉴바 도구 중 하나 | 도구 자체 메뉴 / Windows 기본 |
 
 **구성요소 관리자 (Windows Update와 함께 동작)**
 - ExplorerPatcher(GPL-2.0, 공식 GitHub 릴리스)를 비롯한 셸 구성요소는 **설정 > 앱 목록에 보이지 않고** 자동으로 관리됩니다.
@@ -84,7 +84,17 @@ Edge를 다시 쓰고 싶으면 LiteWin 설정 > 브라우저에서 Edge를 체�
   - 전체화면에서는 숨었다가 마우스를 화면 맨 위로 올리면 나타납니다.
   - 버튼 3개 또는 전체화면 버튼만 고를 수 있습니다.
   - 앱별 위치 조정과 제외 목록은 `%LOCALAPPDATA%\LiteWin\Caption.ini`에서 설정합니다.
-- **Seelen UI** (오픈소스, AGPL-3.0): 맥 UI 모드에서만 실행되고, 다른 모드로 돌아가면 자동 시작까지 함께 꺼집니다. LiteWin은 공식 배포판을 winget으로 설치하고 켜고 끄기만 합니다.
+- **Dock·메뉴바 도구** (설정 > 모드 > 맥 입력 + UI 에서 하나 선택, 맥 UI 모드에서만 실행되고 다른 모드로 돌아가면 꺼짐)
+
+  | 도구 | 맥과 닮은 정도 | 비용 | 설치 |
+  |---|---|---|---|
+  | **Seelen UI** (기본) | 위쪽 메뉴바 + Dock | 무료, 오픈소스(AGPL-3.0) | LiteWin이 winget으로 자동 설치 |
+  | **MyDockFinder** | 가장 가까움: 맥식 Dock(확대·애니메이션), 위쪽 메뉴바, Launchpad | 유료(약 5달러), 소스 비공개 | **Steam에서 직접 구매·설치**. 고르면 Steam 페이지를 엽니다. 설치 후 [적용]을 다시 누르면 맥 UI와 함께 켜짐 |
+  | **Nexus Dock** | Dock만 (확대 효과). 쓰는 동안 Windows 작업표시줄 자동 숨김 | 무료(개인용) | LiteWin이 winget으로 자동 설치 |
+  | 사용 안 함 | Windows 작업표시줄 가운데 정렬 | — | — |
+
+  - 도구 자체의 "Windows 시작 시 실행"은 꺼 두고, LiteWin 셸이 맥 UI 모드일 때만 띄웁니다.
+  - 화면 위 메뉴바에 지금 앱의 "파일·편집·보기" 메뉴가 나오는 macOS 방식은 Windows 구조상 어떤 도구도 완전히 재현하지 못합니다.
 - 맥 UI 상세 설명은 [docs/mac-ui.md](docs/mac-ui.md)에 있습니다.
 
 ### 사진·동영상
