@@ -217,8 +217,7 @@ jobs:
           $n = 'lwtest' + (Get-Random -Maximum 9999)
           try {
             New-LWAccount -Name $n -Password '' -Admin $false
-            foreach ($t in 2, 3, 4, 5, 8) { Write-Host ("logon type {0}: blank={1} wrong={2}" -f $t, [LiteWin.Logon]::Check($n, '', $t), [LiteWin.Logon]::Check($n, 'x', $t)) }
-            Write-Host "LimitBlankPasswordUse=$((Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\Lsa).LimitBlankPasswordUse)"
+            Write-Host ("logon codes: blank={0} wrong={1}" -f [LiteWin.Logon]::Check($n, '', 3), [LiteWin.Logon]::Check($n, 'x', 3))
             if (Test-LWHasPassword $n) { Write-Host '::error::blank password not detected'; exit 1 }
             Set-LWAccountPassword -Name $n -Password 'Lw-Test-1234!'
             if (-not (Test-LWHasPassword $n)) { Write-Host '::error::password not detected'; exit 1 }

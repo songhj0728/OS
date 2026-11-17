@@ -14,7 +14,8 @@ namespace LiteWin {
         [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         static extern bool LogonUser(string user, string domain, string password, int type, int provider, out IntPtr token);
         [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
-        // 0 = 맞음, 1326 = 틀림, 1327 = 맞지만 빈 암호라 네트워크 로그온 제한, 1331 = 사용 안 함 계정 ...
+        // 0 = 맞음, 1326 = 틀림. 암호는 맞지만 다른 제한으로 막힌 경우:
+        // 1327 빈 암호 제한, 1330 암호 만료, 1385 이 방식 로그온 권한 없음, 1907 다음 로그온 때 암호 변경 필요
         public static int Check(string user, string password, int type) {
             IntPtr t;
             if (LogonUser(user, ".", password ?? "", type, 0, out t)) { CloseHandle(t); return 0; }
@@ -31,8 +32,8 @@ function Test-LWPassword {
     <# 이 암호가 맞으면 $true (빈 암호 계정에 빈 문자열을 넣으면 $true) #>
     param([Parameter(Mandatory)][string]$Name, [string]$Password = '')
     $r = [LiteWin.Logon]::Check($Name, $Password, 3)            # 네트워크 로그온(가벼움)
-    if ($r -eq 1385) { $r = [LiteWin.Logon]::Check($Name, $Password, 2) }   # 그 방식이 막혀 있으면 대화형으로
-    return ($r -eq 0 -or ($r -eq 1327 -and -not $Password))
+    # 이 코드들은 Windows 가 암호를 확인한 뒤에만 돌려준다 → 암호는 맞음
+    return ($r -in 0, 1327, 1330, 1385, 1907)
 }
 
 function Test-LWHasPassword([string]$Name) { -not (Test-LWPassword -Name $Name -Password '') }
@@ -92,4 +93,6 @@ function New-LWAccount {
     $grp = if ($Admin) { 'S-1-5-32-544' } else { 'S-1-5-32-545' }   # Administrators / Users (언어와 무관)
     Add-LocalGroupMember -SID $grp -Member $Name -ErrorAction SilentlyContinue
     if ($Admin) { Add-LocalGroupMember -SID 'S-1-5-32-545' -Member $Name -ErrorAction SilentlyContinue }
+    # '다음 로그온 때 암호 변경' 표시가 붙지 않게
+    try { $u = [ADSI]"WinNT://$env:COMPUTERNAME/$Name,user"; $u.PasswordExpired = 0; $u.SetInfo() } catch { }
 }
