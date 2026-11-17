@@ -1,7 +1,11 @@
 # 맥 입력 + UI 스타일
 
-> **Seelen UI (권장, 오픈소스 AGPL-3.0)** — 화면 위 맥식 메뉴바(시계·배터리·와이파이·미디어)와 아래 Dock 으로 Windows 작업표시줄을 대신한다.
-> 맥 UI 모드에서 기본으로 켜지고, 라이트/맥 입력 모드로 돌아가면 꺼진다(자동 시작도 함께 끔). winget `Seelen.SeelenUI` 로 설치하며 LiteWin 은 설정만 켜고 끈다.
+> **Dock·메뉴바 도구 (하나 선택)** — LiteWin 설정 > 모드 > 맥 입력 + UI 의 'Dock · 메뉴바 도구'
+> - **Seelen UI** (기본, 무료·오픈소스 AGPL-3.0): 위쪽 메뉴바 + Dock. winget `Seelen.SeelenUI` 로 자동 설치.
+> - **MyDockFinder** (유료, Steam 앱 1787090): 가장 맥과 비슷한 Dock·메뉴바·Launchpad. Steam 에서 직접 구매·설치. `steamapps\common\MyDockFinder\dock_64.exe` 를 찾아 켜고 끈다.
+> - **Nexus Dock** (무료, 개인용): Dock 만. winget `WinStep.Nexus`. 쓰는 동안 Windows 작업표시줄은 자동 숨김.
+>
+> 어느 도구든 맥 UI 모드에서만 실행되고, 라이트/맥 입력 모드로 돌아가면 꺼진다(도구 자체의 자동 시작은 꺼 둠).
 
 
 LiteWin 설정 > 모드 > **맥 입력 + UI 스타일** 에서 고르는 항목이다. 언제든 **라이트 윈도우**로 돌아가면 처음 값으로 복원된다.
