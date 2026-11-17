@@ -178,12 +178,22 @@ Set-ExecutionPolicy -Scope Process Bypass
 - 그림 파일은 `C:\Windows\Web\Wallpaper\LiteWin`에 있습니다. 개인 설정 > 배경 > 사진 찾아보기에서 직접 골라도 됩니다.
 - 그림을 바꾸거나 추가하려면 저장소의 `assets\wallpapers` 폴더를 고친 뒤 다시 빌드하세요.
 
-### 빠르게 반복 테스트하기
-- **빠른 빌드:** `.\build\Build-LiteWin.ps1 -Fast`
+### 빌드 부담 줄이기 / 업데이트
+- **ISO는 처음 한 번만:** 설정 앱·모드·셸·맥 키보드처럼 LiteWin 자체 기능이 바뀐 것은 ISO를 다시 만들 필요가 없습니다. 설치된 PC에서 **LiteWin 설정 > 정보 > LiteWin 업데이트 확인**을 누르면 공개 Release에서 받아 바꿉니다.
+  - ISO를 다시 만들어야 하는 경우: 지우는 앱 목록, 레지스트리 정책, Edge 제거, 기본 배경, 설치 프로그램(setup) 단계를 바꿨을 때뿐입니다.
+- **기본 빌드 = 빠른 빌드:** `.\build\Build-LiteWin.ps1`만 실행해도 캐시를 씁니다(예전 `-Fast`와 같음).
   - 중간 결과를 `C:\LiteWinWork\cache`에 저장해 두고 다음 빌드부터 재사용합니다. 재사용 대상은 ISO 내용, Pro 이미지, 앱 제거·레지스트리·Edge 제거까지 끝난 이미지, 내려받은 설치 파일(7일간)입니다.
   - 지우는 앱 목록이나 레지스트리 정책을 바꾼 경우에만 그 단계를 다시 합니다.
-  - 구성요소 정리와 최대 압축을 생략하므로 ISO가 조금 커집니다. 배포용 ISO는 `-Fast` 없이 만드세요.
+  - 빌드 프로세스 우선순위를 '낮음'으로 두어 빌드 중에도 PC를 쓸 수 있습니다 (`-Priority Normal`로 되돌림).
+  - 가장 작은 ISO가 필요할 때만 `-Release`(캐시 없음 + 구성요소 정리 + 최대 압축, 오래 걸림).
   - 캐시는 10GB 안팎을 차지합니다. `cache` 폴더를 지우면 처음부터 다시 만듭니다.
+- **업데이트 배포 (공개 Release):** 이 저장소는 비공개라서, 업데이트 파일만 올리는 **공개 저장소**를 따로 둡니다.
+  1. GitHub에서 공개 저장소 `LiteWin-releases`를 만듭니다 (README 추가에 체크 — 빈 저장소에는 Release를 만들 수 없음).
+  2. Settings > Developer settings > Fine-grained tokens에서 그 저장소만 고르고 **Contents: Read and write** 권한으로 토큰을 만듭니다.
+  3. 이 저장소 Settings > Secrets and variables > Actions에 secret `LITEWIN_RELEASE_TOKEN`으로 넣습니다. 저장소 이름이 다르면 variable `RELEASE_REPO`(예: `내아이디/저장소`)도 넣습니다.
+  4. `main`에 push하거나 Actions > release > Run workflow를 누르면 `LiteWin-update.zip`이 Release로 올라갑니다.
+  - 공개 저장소에는 이 저장소의 코드(설정 앱·스크립트)와 컴파일된 exe만 올라갑니다. Windows ISO나 수정한 이미지는 절대 올리지 않습니다.
+  - 설치된 PC는 GitHub가 계산한 SHA-256과 받은 파일이 같을 때만 설치합니다.
 - **재설치 없이 반영:** 설치된 VM 안에서 `tools\Update-LiteWinFromRepo.ps1`을 실행하면, 설정 앱·셸·맥 단축키·구성요소 관리자 수정분만 바꿔 넣습니다.
   - VMware라면 공유 폴더에 이 저장소를 추가한 뒤, VM의 관리자 PowerShell에서 실행합니다.
     ```powershell

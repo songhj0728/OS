@@ -191,3 +191,19 @@ jobs:
           Write-Host "status: $($st.Text) channel=$($st.Channel)"
           Write-Host (Get-ActivationErrorText 'error 0x80072F8F happened')
           Write-Host "clock skew (min): $(Test-LWClock)"
+
+      - name: Online update package + version compare
+        shell: powershell
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'upd'
+          $zip = & .\tools\New-UpdatePackage.ps1 -OutDir $out -Version '2026.1.2.3' -Commit 'test'
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $names = [IO.Compression.ZipFile]::OpenRead($zip).Entries.FullName -replace '\\', '/'
+          foreach ($n in 'version.json', 'lib/LiteWin.Common.ps1', 'lib/LiteWin.Update.ps1', 'app/LiteWinSettings.ps1', 'bin/LiteWinSettings.exe') {
+            if ($names -notcontains $n) { Write-Host "::error::update zip missing $n"; exit 1 }
+          }
+          . .\lib\LiteWin.Update.ps1
+          if (-not ((ConvertTo-LWVersion 'v2026.11.17.5') -gt (ConvertTo-LWVersion '2026.11.17.0'))) { exit 1 }
+          if (-not ((ConvertTo-LWVersion 'v2026.11.18.1') -gt (ConvertTo-LWVersion '2026.11.17.9'))) { exit 1 }
+          if ((ConvertTo-LWVersion 'garbage') -ne [version]'0.0.0.0') { exit 1 }
+          Write-Host "update repo: $(Get-LWUpdateRepo); current: $((Get-LWVersion).Version)"

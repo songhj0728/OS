@@ -34,9 +34,15 @@
 .PARAMETER SplitForFat32     install.wim 이 4GB 를 넘으면 install.swm 으로 분할 (FAT32 USB 용)
 .PARAMETER OscdimgPath       oscdimg.exe 경로 (기본: ADK 설치 경로 자동 탐색)
 .PARAMETER NoIso             ISO 를 만들지 않고 WorkDir\iso 폴더까지만 (Rufus 등으로 직접 USB 굽기)
-.PARAMETER Fast              빠른 빌드(테스트용). WorkDir\cache 에 중간 결과를 저장해 다음 빌드부터 재사용:
+.PARAMETER Release           완전 빌드: 캐시를 쓰지 않고 구성요소 정리(ResetBase)와 최대 압축까지 한다 (ISO 가 가장 작음, 오래 걸림).
+                             지정하지 않으면 기본은 빠른 빌드(-Fast)다.
+.PARAMETER Fast              빠른 빌드 (기본값 — 예전 호환용으로 남겨 둠). WorkDir\cache 에 중간 결과를 저장해 다음 빌드부터 재사용:
                              ISO 풀기/Pro 추출, 앱 제거·레지스트리·Edge 제거까지 끝난 이미지, 내려받은 설치 파일(7일).
-                             구성요소 정리(ResetBase)와 최대 압축을 생략한다 → ISO 가 조금 크다. 배포용은 -Fast 없이.
+                             구성요소 정리(ResetBase)와 최대 압축을 생략한다 → ISO 가 조금 크다.
+                             LiteWin 코드(설정 앱 등)만 바뀌었다면 ISO 를 다시 만들 필요 없이 설치된 PC 에서
+                             'LiteWin 설정 > 정보 > LiteWin 업데이트' 로 받으면 된다.
+.PARAMETER Priority          빌드 중 PC 가 덜 버벅이도록 프로세스 우선순위를 낮춘다: Low(기본, 낮음) / BelowNormal / Normal
+.PARAMETER UpdateRepo        설치된 LiteWin 이 업데이트를 받을 공개 GitHub 저장소 (기본 songhj0728/LiteWin-releases)
 .PARAMETER SetupBackground   Windows 설치 프로그램(디스크 고르는 화면) 배경색. 기본은 배경화면과 어울리는 짙은 청회색 #2B2F38.
                              빈 문자열이면 바꾸지 않는다. -Fast 캐시가 있으면 cache 폴더를 지워야 색이 다시 적용된다.
 .PARAMETER NoChrome          Chrome 을 넣지 않음 (Edge 도 제거하지 않음)
@@ -63,6 +69,9 @@ param(
     [switch]$NoIso,
     [switch]$NoChrome,
     [switch]$Fast,
+    [switch]$Release,
+    [ValidateSet('Low', 'BelowNormal', 'Normal')][string]$Priority = 'Low',
+    [string]$UpdateRepo = 'songhj0728/LiteWin-releases',
     [string]$SetupBackground = '#2B2F38',
     [switch]$KeepWorkDir
 )
@@ -70,6 +79,13 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'   # DISM cmdlet 진행표시줄이 매우 느려서 끔
 $RepoRoot = Split-Path -Parent $PSScriptRoot
+# 기본은 빠른(캐시) 빌드. -Release 일 때만 완전 빌드
+if ($Release) { $Fast = $false } else { $Fast = $true }
+# 우선순위 낮춤: DISM 등 자식 프로세스도 이 우선순위를 물려받아 빌드 중에도 PC 를 쓸 수 있다
+try {
+    $prio = @{ Low = 'Idle'; BelowNormal = 'BelowNormal'; Normal = 'Normal' }[$Priority]
+    (Get-Process -Id $PID).PriorityClass = [System.Diagnostics.ProcessPriorityClass]$prio
+} catch { }
 . (Join-Path $PSScriptRoot 'OfflineTweaks.ps1')
 . (Join-Path $PSScriptRoot 'OfflineEdge.ps1')
 . (Join-Path $PSScriptRoot 'OfflineRegAccess.ps1')
@@ -645,6 +661,12 @@ SCRNSAVE.EXE=
     $cfg | ConvertTo-Json -Depth 5 | Out-File (Join-Path $lw 'profile.json') -Encoding utf8
     @{ RemoveEdge = $cfg.RemoveEdge; EdgeRedirect = $cfg.RemoveEdge; BrowserName = 'Google Chrome'; DefaultBrowser = 'chrome' } | ConvertTo-Json |
         Out-File (Join-Path $lw 'machine.json') -Encoding utf8
+    # 버전 / 업데이트 받을 곳 (설치 후 'LiteWin 업데이트' 가 이 값과 공개 Release 를 비교한다)
+    $commit = ''
+    try { $commit = (& git -C $RepoRoot rev-parse --short HEAD 2>$null | Select-Object -First 1) } catch { }
+    @{ Version = (Get-Date -Format 'yyyy.M.d') + '.0'; Commit = "$commit"; Date = (Get-Date -Format 'yyyy-MM-dd'); Source = 'iso' } | ConvertTo-Json |
+        Out-File (Join-Path $lw 'version.json') -Encoding utf8
+    @{ Repo = $UpdateRepo } | ConvertTo-Json | Out-File (Join-Path $lw 'update.json') -Encoding utf8
 
     # LiteWin 자체 프로그램 컴파일 (.NET Framework 내장 컴파일러, 외부 도구 불필요)
     Step 'LiteWin 프로그램 컴파일 (설정 실행 파일, 창 버튼, Edge 링크 리다이렉트)'

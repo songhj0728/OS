@@ -1,0 +1,66 @@
+name: release
+
+# LiteWin 온라인 업데이트 배포.
+#   main 에 push 되거나 수동 실행(workflow_dispatch)하면 LiteWin-update.zip 을 만들어
+#   공개 저장소(기본 songhj0728/LiteWin-releases)의 Release 로 올린다.
+#   설치된 PC 는 'LiteWin 설정 > 정보 > LiteWin 업데이트 확인' 에서 이것을 받는다.
+# 필요한 설정 (이 저장소 Settings > Secrets and variables > Actions):
+#   secret   LITEWIN_RELEASE_TOKEN : 공개 저장소에 Contents 읽기/쓰기 권한이 있는 fine-grained 토큰
+#   variable RELEASE_REPO (선택)   : 공개 저장소 이름, 기본 songhj0728/LiteWin-releases
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: '릴리스 설명 (선택)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: litewin-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ secrets.LITEWIN_RELEASE_TOKEN }}
+      RELEASE_REPO: ${{ vars.RELEASE_REPO || 'songhj0728/LiteWin-releases' }}
+      NOTES: ${{ github.event.inputs.notes }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build update package
+        shell: powershell
+        run: |
+          $ver = (Get-Date -Format 'yyyy.M.d') + '.' + $env:GITHUB_RUN_NUMBER
+          $sha = $env:GITHUB_SHA.Substring(0, 7)
+          $zip = & .\tools\New-UpdatePackage.ps1 -OutDir (Join-Path $env:RUNNER_TEMP 'out') -Version $ver -Commit $sha
+          "VERSION=$ver" | Out-File $env:GITHUB_ENV -Append -Encoding ascii
+          "ZIP=$zip" | Out-File $env:GITHUB_ENV -Append -Encoding ascii
+
+      - name: Publish public release
+        shell: powershell
+        run: |
+          if (-not $env:GH_TOKEN) {
+            Write-Host "::warning::LITEWIN_RELEASE_TOKEN secret is not set - package built but not published"
+            exit 0
+          }
+          $sha = $env:GITHUB_SHA.Substring(0, 7)
+          $msg = (git log -1 --pretty=%s) 2>$null
+          $notesFile = Join-Path $env:RUNNER_TEMP 'notes.md'
+          $body = @("LiteWin $env:VERSION (commit $sha)", '', "$msg")
+          if ($env:NOTES) { $body += @('', $env:NOTES) }
+          $body | Out-File $notesFile -Encoding utf8
+          gh release create "v$env:VERSION" "$env:ZIP" -R $env:RELEASE_REPO --title "LiteWin $env:VERSION" --notes-file $notesFile --latest
+          if ($LASTEXITCODE) { Write-Host "::error::gh release create failed ($LASTEXITCODE)"; exit 1 }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LiteWin-update
+          path: ${{ env.ZIP }}

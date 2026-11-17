@@ -17,6 +17,7 @@ $root = Split-Path -Parent $PSScriptRoot
 . (Join-Path $root 'lib\LiteWin.Browsers.ps1')
 . (Join-Path $root 'lib\LiteWin.Theme.ps1')
 . (Join-Path $root 'lib\LiteWin.Activation.ps1')
+. (Join-Path $root 'lib\LiteWin.Update.ps1')
 
 # 관리자 권한으로 다시 실행
 if (-not (Test-LWAdmin)) {
@@ -28,6 +29,7 @@ if (-not (Test-LWAdmin)) {
 
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 [Windows.Forms.Application]::EnableVisualStyles()
+Complete-LWPendingBinaries   # 지난 LiteWin 업데이트 때 사용 중이라 못 바꾼 exe 교체
 
 $catalog = Get-LWCatalog
 $state   = Get-LWState
@@ -377,6 +379,32 @@ function Get-BrowserChoices {
 # ============================================================== 탭 5: 정보 (구성요소)
 $p5 = New-Page '정보'
 $cst = Get-LWComponentState
+# ---- LiteWin 자체 업데이트 (공개 Release) ----
+$lwv = Get-LWVersion
+[void](Add-Label $p5 'LiteWin' $bold)
+$lblLwVer = Add-Label $p5 ("버전: {0}{1}   받는 곳: github.com/{2}" -f $lwv.Version, $(if ($lwv.Commit) { " ($($lwv.Commit))" } else { '' }), (Get-LWUpdateRepo)) $font
+[void](Add-Label $p5 '    설정 앱·모드·맥 키보드 같은 LiteWin 기능은 ISO 를 다시 만들지 않고 여기서 최신으로 바꿀 수 있습니다.' $small $gray)
+$btnLwUpd = New-Object Windows.Forms.Button; $btnLwUpd.Text = 'LiteWin 업데이트 확인'; $btnLwUpd.AutoSize = $true
+$btnLwUpd.add_Click({
+    $form.Cursor = 'WaitCursor'
+    try { $chk = Test-LWUpdate }
+    catch { $form.Cursor = 'Default'; [Windows.Forms.MessageBox]::Show("업데이트 정보를 가져오지 못했습니다.`n$($_.Exception.Message)", 'LiteWin 업데이트') | Out-Null; return }
+    $form.Cursor = 'Default'
+    if (-not $chk.Available) { [Windows.Forms.MessageBox]::Show("최신 버전입니다 ($($chk.Current)).", 'LiteWin 업데이트') | Out-Null; return }
+    $notes = "$($chk.Release.Notes)"; if ($notes.Length -gt 600) { $notes = $notes.Substring(0, 600) + '…' }
+    $ans = [Windows.Forms.MessageBox]::Show("새 버전이 있습니다: $($chk.Current) → $($chk.Latest)`n`n$notes`n`n지금 설치할까요? 설치 후 설정 창이 다시 열립니다.", 'LiteWin 업데이트', 'YesNo', 'Question')
+    if ($ans -ne 'Yes') { return }
+    $form.Cursor = 'WaitCursor'
+    try { $msg = Install-LWUpdate }
+    catch { $form.Cursor = 'Default'; [Windows.Forms.MessageBox]::Show("업데이트 실패: $($_.Exception.Message)`n기존 버전은 그대로입니다.", 'LiteWin 업데이트', 'OK', 'Warning') | Out-Null; return }
+    $form.Cursor = 'Default'
+    [Windows.Forms.MessageBox]::Show($msg, 'LiteWin 업데이트') | Out-Null
+    $exe = Join-Path $script:LWRoot 'bin\LiteWinSettings.exe'
+    if (Test-Path $exe) { Start-Process $exe } else { Start-Process powershell.exe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', "`"$PSCommandPath`"") }
+    $form.Close()
+})
+$p5.Controls.Add($btnLwUpd)
+[void](Add-Label $p5 '셸 구성요소' $bold $null 12)
 [void](Add-Label $p5 '셸 구성요소는 Windows Update 와 함께 자동으로 관리됩니다. 따로 신경 쓰지 않아도 됩니다.' $bold)
 $epi = Get-EPInstalled
 $verLines = @(
