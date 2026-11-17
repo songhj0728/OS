@@ -97,32 +97,8 @@ if (Test-Path (Join-Path $payloadDir 'ep_setup.exe')) {
         Log 'Windows 보안 검사 예외: Program Files\ExplorerPatcher, Windows\dxgi.dll'
     } catch { Log "Windows 보안 예외 추가 실패: $_" }
 }
-if (Test-Path $payloadJson) {
-    foreach ($pl in @(Get-Content $payloadJson -Raw -Encoding UTF8 | ConvertFrom-Json)) {
-        if (-not $pl -or -not $pl.File) { continue }
-        $file = Join-Path $payloadDir $pl.File
-        if (-not (Test-Path $file)) { continue }
-        try {
-            if ($file -like '*.zip') {
-                # 포터블 프로그램: Program Files 아래에 풀기만 한다
-                $target = Join-Path $env:ProgramFiles $pl.PortableDir
-                Expand-Archive -Path $file -DestinationPath $target -Force
-                Log "설치(포터블): $($pl.Name) → $target"
-                Remove-Item $file -Force -ErrorAction SilentlyContinue
-                continue
-            }
-            if ($file -like '*.msi') {
-                $proc = Start-Process msiexec.exe -ArgumentList "/i `"$file`" $($pl.Args)" -Wait -PassThru
-            } elseif ($pl.Args) {
-                $proc = Start-Process $file -ArgumentList $pl.Args -Wait -PassThru
-            } else {
-                $proc = Start-Process $file -Wait -PassThru
-            }
-            Log "설치: $($pl.Name) 종료 코드 $($proc.ExitCode)"
-            if (-not $pl.Keep) { Remove-Item $file -Force -ErrorAction SilentlyContinue }   # EP 는 재설치용으로 보관
-        } catch { Log "설치 실패: $($pl.Name) — $_" }
-    }
-}
+. (Join-Path $root 'lib\LiteWin.Payloads.ps1')
+Install-LWPayloads -PayloadDir $payloadDir | ForEach-Object { Log $_ }
 
 # ExplorerPatcher 설치 확인 (Windows 보안이 오탐지로 막는 일이 있어 결과를 남긴다)
 if (Test-Path (Join-Path $payloadDir 'ep_setup.exe')) {

@@ -230,3 +230,60 @@ jobs:
             if (-not (Test-LWAccountName 'a/b')) { exit 1 }; if (Test-LWAccountName 'user2') { exit 1 }
             $list | Format-Table Name, IsAdmin, HasPassword, Picture -AutoSize | Out-String | Write-Host
           } finally { Remove-LocalUser -Name $n -ErrorAction SilentlyContinue }
+
+  shell-payloads:
+    # 빌드 → 설치 마지막 단계(SYSTEM) → 사용자 로그인 순서를 그대로 재현해서 RetroBar / Open-Shell 이 실제로 깔리고 뜨는지 확인
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download payloads exactly like the build
+        shell: powershell
+        run: |
+          . .\lib\LiteWin.Common.ps1; . .\lib\LiteWin.Components.ps1
+          $Fast = $false; $tmpDir = Join-Path $env:RUNNER_TEMP 'pl'; $dlCache = $tmpDir
+          function Test-FreshFile { $false }; function Warn($m) { Write-Host "::warning::$m" }; function Info($m) { Write-Host "    $m" }
+          . .\build\Payloads.ps1
+          $Payloads = @($Payloads | Where-Object { $_.Name -in 'dotnet-desktop', 'retrobar', 'openshell' })
+          $dest = Join-Path $env:RUNNER_TEMP 'payload'; New-Item -ItemType Directory $dest -Force | Out-Null
+          $list = @(Save-WingetPayloads -Dest $dest)
+          ConvertTo-Json -InputObject $list -Depth 3 | Out-File (Join-Path $dest 'payloads.json') -Encoding utf8
+          Get-Content (Join-Path $dest 'payloads.json')
+          Get-ChildItem $dest | Format-Table Name, Length | Out-String | Write-Host
+          Get-ChildItem $tmpDir -Recurse -Filter *.yaml | ForEach-Object { Write-Host "--- $($_.FullName)"; Select-String -Path $_.FullName -Pattern 'InstallerType|Scope|Silent|InstallerUrl' | ForEach-Object { Write-Host $_.Line } }
+
+      - name: Install as SYSTEM (same as SetupComplete)
+        shell: powershell
+        run: |
+          $dest = Join-Path $env:RUNNER_TEMP 'payload'; $log = Join-Path $env:RUNNER_TEMP 'install.log'
+          $ps1 = Join-Path $env:RUNNER_TEMP 'install.ps1'
+          "`$ErrorActionPreference='Continue'; . '$pwd\lib\LiteWin.Payloads.ps1'; Install-LWPayloads -PayloadDir '$dest' *>&1 | Out-File '$log' -Encoding utf8" | Set-Content $ps1 -Encoding UTF8
+          $act = New-ScheduledTaskAction -Execute powershell.exe -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$ps1`""
+          Register-ScheduledTask -TaskName LWPayloadTest -Action $act -User 'NT AUTHORITY\SYSTEM' -RunLevel Highest -Force | Out-Null
+          Start-ScheduledTask -TaskName LWPayloadTest
+          $t0 = Get-Date
+          do { Start-Sleep 5; $st = (Get-ScheduledTask -TaskName LWPayloadTest).State } while ($st -eq 'Running' -and ((Get-Date) - $t0).TotalMinutes -lt 25)
+          Write-Host "task state: $st, result: $((Get-ScheduledTaskInfo -TaskName LWPayloadTest).LastTaskResult)"
+          if (Test-Path $log) { Get-Content $log | Write-Host }
+          foreach ($p in "$env:ProgramFiles\RetroBar\RetroBar.exe", "$env:ProgramFiles\Open-Shell\StartMenu.exe") { Write-Host ("{0}: {1}" -f $p, (Test-Path $p)) }
+          Get-ChildItem "$env:ProgramFiles\dotnet\shared\Microsoft.WindowsDesktop.App" -Directory -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "WindowsDesktop.App $($_.Name)" }
+          Get-ChildItem "$env:WINDIR\System32\config\systemprofile\AppData\Local\Programs" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "systemprofile Programs: $($_.Name)" }
+
+      - name: Start RetroBar and Open-Shell as the user
+        shell: powershell
+        run: |
+          $bad = 0
+          $rb = "$env:ProgramFiles\RetroBar\RetroBar.exe"
+          if (Test-Path $rb) {
+            $p = Start-Process $rb -PassThru; Start-Sleep 15
+            if ($p.HasExited) { Write-Host "::error::RetroBar exited (code $($p.ExitCode))"; $bad++ } else { Write-Host 'RetroBar running'; $p | Stop-Process -Force }
+            Get-ChildItem "$env:LOCALAPPDATA\RetroBar" -Recurse -Filter *.log -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "--- $($_.Name)"; Get-Content $_.FullName -Tail 30 | Write-Host }
+          } else { Write-Host '::error::RetroBar.exe not installed'; $bad++ }
+          $os = "$env:ProgramFiles\Open-Shell\StartMenu.exe"
+          if (Test-Path $os) {
+            Start-Process $os -ArgumentList '-autorun'; Start-Sleep 8
+            if (Get-Process StartMenu -ErrorAction SilentlyContinue) { Write-Host 'Open-Shell StartMenu running' } else { Write-Host '::error::Open-Shell StartMenu not running'; $bad++ }
+            Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' | Format-List | Out-String | Write-Host
+          } else { Write-Host '::error::Open-Shell not installed'; $bad++ }
+          Get-Process explorer -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "explorer pid $($_.Id) session $($_.SessionId)" }
+          if ($bad) { exit 1 }
