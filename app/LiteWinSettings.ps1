@@ -23,6 +23,7 @@ $root = Split-Path -Parent $PSScriptRoot
 if (-not (Test-LWAdmin)) {
     $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', "`"$PSCommandPath`"")
     if ($FirstRun) { $argList += '-FirstRun' }
+    if ($ApplyPending) { $argList += '-ApplyPending' }
     Start-Process powershell.exe -Verb RunAs -ArgumentList $argList
     exit
 }
@@ -192,7 +193,7 @@ if ($true) {
                 $adm = Get-LocalUser | Where-Object { $_.SID.Value -like 'S-1-5-*-500' } | Select-Object -First 1
                 Set-LocalUser -SID $adm.SID -Password (ConvertTo-SecureString $txtAdm.Text -AsPlainText -Force) -ErrorAction Stop
                 Enable-LocalUser -SID $adm.SID -ErrorAction Stop
-                $script:AdminHandoff = @{ OldUser = $me; Admin = $adm.Name; CopyFiles = $cbCopyFiles.Checked; KeepOld = $cbKeepOld.Checked; OldProfile = $env:USERPROFILE }
+                $script:AdminHandoff = @{ OldUser = $me; Target = $adm.Name; IsAdmin = $true; AutoLogon = $false; CopyFiles = $cbCopyFiles.Checked; KeepOld = $cbKeepOld.Checked; OldProfile = $env:USERPROFILE }
                 Write-LWLog "Administrator 로 전환 선택 (경고 2회 확인) — 파일 복사 $($cbCopyFiles.Checked), 기존 계정 유지 $($cbKeepOld.Checked)" WARN
                 return $true
             }
@@ -211,6 +212,100 @@ if ($true) {
             return $true
         } catch {
             [Windows.Forms.MessageBox]::Show("계정 설정 실패: $($_.Exception.Message)", 'LiteWin') | Out-Null; return $false
+        }
+    }
+}
+
+# ============================================================== 첫 설정 전용: 계정 종류 → 로컬 계정 / Administrator 암호
+#   설치는 임시 계정(LiteWinSetup)으로 끝나고, 여기서 고른 계정으로 로그인하면 임시 계정은 지워진다.
+#   (Windows OOBE 는 계정 화면 앞에 제조사 페이지를 넣을 수 없어서 이 화면에서 묻는다)
+if ($FirstRun) {
+    function New-FreePage([string]$title) {
+        $page = New-Object Windows.Forms.TabPage $title
+        $pn = New-Object Windows.Forms.Panel; $pn.Dock = 'Fill'
+        $page.Controls.Add($pn); $tabs.TabPages.Add($page); return $pn
+    }
+    # ---- 1) 계정 종류: 설명 + 오른쪽 아래 체크박스 ----
+    $pKind = New-FreePage '계정 종류'
+    $kindText = New-Object Windows.Forms.Label
+    $kindText.Location = New-Object Drawing.Point(12, 8); $kindText.Size = New-Object Drawing.Size(690, 300)
+    $kindText.Text = "이 PC 에서 쓸 계정을 만듭니다. Microsoft 계정 없이 이 PC 에만 있는 로컬 계정으로 만들어집니다.`n`n" +
+        "• 보통은 그대로 [다음] 을 누르세요. 이름과 암호를 정해 관리자 권한이 있는 로컬 계정을 만듭니다.`n" +
+        "  프로그램 설치처럼 시스템을 바꿀 때만 확인 창이 뜹니다.`n`n" +
+        "• 오른쪽 아래를 체크하면 Windows 에 들어 있는 '기본 제공 Administrator' 계정을 씁니다.`n" +
+        "  확인 창(UAC) 없이 모든 프로그램이 최고 권한으로 실행되므로 권장하지 않습니다.`n`n" +
+        "어느 쪽이든 나중에 시작 메뉴 > LiteWin 설정 > 계정 에서 바꿀 수 있습니다."
+    $kindText.Font = New-Object Drawing.Font('Malgun Gothic', 10)
+    $cbUseAdmin = New-Object Windows.Forms.CheckBox
+    $cbUseAdmin.Text = '기본 제공 Administrator 계정으로 사용 (권장하지 않음)'; $cbUseAdmin.AutoSize = $true
+    $cbUseAdmin.Anchor = 'Bottom, Right'
+    $pKind.Controls.AddRange(@($kindText, $cbUseAdmin))
+    $pKind.add_Resize({ $cbUseAdmin.Location = New-Object Drawing.Point(($pKind.ClientSize.Width - $cbUseAdmin.PreferredSize.Width - 12), ($pKind.ClientSize.Height - $cbUseAdmin.PreferredSize.Height - 8)) })
+    $script:frAdminConfirmed = $false
+    $cbUseAdmin.add_CheckedChanged({
+        if (-not $cbUseAdmin.Checked -or $script:frAdminConfirmed) { return }
+        $m1 = "기본 제공 Administrator 계정은 사용자 계정 컨트롤(UAC) 확인 없이 모든 프로그램이 최고 권한으로 실행됩니다.`n`n" +
+              "- 악성 프로그램이 확인 창 없이 시스템 전체를 바꿀 수 있습니다`n- 실수로 시스템 파일을 지워도 막아 주지 않습니다`n- 일부 Store 앱과 보안 기능이 제한될 수 있습니다`n`n계속할까요?"
+        $r = [Windows.Forms.MessageBox]::Show($m1, '보안 경고 (1/2)', 'YesNo', 'Warning', 'Button2')
+        if ($r -eq 'Yes') {
+            $r = [Windows.Forms.MessageBox]::Show("한 번 더 확인합니다.`n`n일반 로컬 계정은 만들지 않고 Administrator 계정 하나만 씁니다. Administrator 에는 반드시 암호를 정해야 합니다.`n`n정말 Administrator 로 사용할까요?", '보안 경고 (2/2)', 'YesNo', 'Warning', 'Button2')
+        }
+        if ($r -ne 'Yes') { $cbUseAdmin.Checked = $false; return }
+        $script:frAdminConfirmed = $true
+    })
+
+    # ---- 2a) 로컬 계정 만들기 ----
+    $pLocal = New-Page '로컬 계정'
+    [void](Add-Label $pLocal '이 PC 를 쓸 사람의 이름을 입력하세요. 비워 두면 "user" 로 만듭니다.' $bold)
+    $frName = New-TextRow $pLocal '사용자 이름'
+    $frPw   = New-TextRow $pLocal '암호 (선택)' -Password
+    $frPw2  = New-TextRow $pLocal '암호 확인' -Password
+    [void](Add-Label $pLocal '    암호를 비워 두면 암호 없이 로그인합니다. 다른 사람도 쓰는 PC 라면 암호를 정하세요.' $small $gray)
+    [void](Add-Label $pLocal '    Microsoft 계정으로 바뀌지 않는 로컬 계정입니다. Store·Xbox 앱 안에서의 로그인은 그대로 할 수 있습니다.' $small $gray)
+
+    # ---- 2b) Administrator 암호 ----
+    $pAdm = New-Page 'Administrator 암호'
+    [void](Add-Label $pAdm '기본 제공 Administrator 계정의 암호를 정하세요. 반드시 필요합니다.' $bold)
+    $frAdm  = New-TextRow $pAdm 'Administrator 암호' -Password
+    $frAdm2 = New-TextRow $pAdm '암호 확인' -Password
+    [void](Add-Label $pAdm '    설정을 마치면 로그아웃되고, Administrator 로 로그인하면 고른 설정이 적용됩니다.' $small $gray)
+
+    function Invoke-FirstRunAccount {
+        <# 임시 계정에서: 고른 계정을 만들고(또는 Administrator 를 켜고) 그 계정으로 넘겨줄 정보를 만든다. 실패하면 $false #>
+        $me = $env:USERNAME
+        try {
+            if ($cbUseAdmin.Checked) {
+                if (-not $frAdm.Text) { [Windows.Forms.MessageBox]::Show('Administrator 계정에는 암호가 꼭 필요합니다.', 'LiteWin') | Out-Null; return $false }
+                if ($frAdm.Text -ne $frAdm2.Text) { [Windows.Forms.MessageBox]::Show('Administrator 암호가 서로 다릅니다.', 'LiteWin') | Out-Null; return $false }
+                $adm = Get-LocalUser | Where-Object { $_.SID.Value -like 'S-1-5-*-500' } | Select-Object -First 1
+                Set-LocalUser -SID $adm.SID -Password (ConvertTo-SecureString $frAdm.Text -AsPlainText -Force) -ErrorAction Stop
+                Enable-LocalUser -SID $adm.SID -ErrorAction Stop
+                $script:AdminHandoff = @{ OldUser = $me; Target = $adm.Name; IsAdmin = $true; AutoLogon = $false; CopyFiles = $false; KeepOld = $false; OldProfile = $env:USERPROFILE }
+                Write-LWLog '첫 설정: 기본 제공 Administrator 사용 (경고 2회 확인)' WARN
+                return $true
+            }
+            $name = $frName.Text.Trim(); if (-not $name) { $name = 'user' }
+            if ($name.Length -gt 20 -or $name -match '["/\\\[\]:;|=,+*?<>@]' -or $name -match '^\.+$') {
+                [Windows.Forms.MessageBox]::Show('이름은 20자 이하이고 " / \ [ ] : ; | = , + * ? < > @ 를 쓸 수 없습니다.', 'LiteWin') | Out-Null; return $false
+            }
+            if ($name -eq $me -or $name -in 'Administrator', 'Guest', 'DefaultAccount', 'WDAGUtilityAccount') {
+                [Windows.Forms.MessageBox]::Show("'$name' 은(는) 쓸 수 없는 이름입니다.", 'LiteWin') | Out-Null; return $false
+            }
+            if ($frPw.Text -ne $frPw2.Text) { [Windows.Forms.MessageBox]::Show('암호가 서로 다릅니다.', 'LiteWin') | Out-Null; return $false }
+            $u = Get-LocalUser -Name $name -ErrorAction SilentlyContinue
+            if ($u -and $script:frCreatedUser -ne $name) { [Windows.Forms.MessageBox]::Show("'$name' 계정이 이미 있습니다. 다른 이름을 쓰세요.", 'LiteWin') | Out-Null; return $false }
+            $pw = if ($frPw.Text) { ConvertTo-SecureString $frPw.Text -AsPlainText -Force } else { $null }
+            if (-not $u) {
+                if ($pw) { New-LocalUser -Name $name -FullName $name -Password $pw -PasswordNeverExpires -AccountNeverExpires -ErrorAction Stop | Out-Null }
+                else     { New-LocalUser -Name $name -FullName $name -NoPassword -AccountNeverExpires -ErrorAction Stop | Out-Null }
+                $script:frCreatedUser = $name
+            } elseif ($pw) { Set-LocalUser -Name $name -Password $pw -ErrorAction Stop }
+            Add-LocalGroupMember -SID 'S-1-5-32-544' -Member $name -ErrorAction SilentlyContinue   # Administrators (언어와 무관)
+            $script:AdminHandoff = @{ OldUser = $me; Target = $name; IsAdmin = $false; AutoLogon = (-not $pw); CopyFiles = $false; KeepOld = $false; OldProfile = $env:USERPROFILE }
+            Write-LWLog "첫 설정: 로컬 계정 '$name' 만듦 (관리자 그룹, 암호 $(if ($pw) { '있음' } else { '없음' }))"
+            return $true
+        } catch {
+            [Windows.Forms.MessageBox]::Show("계정 만들기 실패: $($_.Exception.Message)", 'LiteWin') | Out-Null; return $false
         }
     }
 }
@@ -493,7 +588,8 @@ function Start-Apply([bool]$installApps) {
                "언제든 '라이트 윈도우'로 돌아가면 프로그램이 멈추고 원래 키 배치로 돌아갑니다. 켤까요?"
         if ([Windows.Forms.MessageBox]::Show($msg, '맥 입력 켜기', 'YesNo', 'Information') -ne 'Yes') { return }
     }
-    if (-not (Invoke-AccountSetup)) { Show-AccountPage; return }
+    $acctOk = if ($FirstRun) { Invoke-FirstRunAccount } else { Invoke-AccountSetup }
+    if (-not $acctOk) { Show-AccountPage; return }
     try { Save-ComponentOptions } catch { }
     $mode = if ($rbUi.Checked) { 'MacUI' } elseif ($rbMac.Checked) { 'MacInput' } else { 'Lite' }
     $ui = @(); foreach ($k in $uiChecks.Keys) { if ($uiChecks[$k].Checked -and $mode -eq 'MacUI') { $ui += $k } }
@@ -516,21 +612,34 @@ function Start-Apply([bool]$installApps) {
         Browsers = @{ Install = $br.Install; Remove = $br.Remove; Default = $br.Default }
     }
     if ($script:AdminHandoff) {
-        # Administrator 로 바꾸는 경우: 선택은 저장해 두고 Administrator 첫 로그인 때 적용한다
+        # 다른 계정으로 넘기는 경우 (첫 설정의 새 로컬 계정 / Administrator):
+        #   선택은 저장해 두고 그 계정의 첫 로그인 때 적용한다. 그때 지금 계정은 지운다 (남겨 두기를 고르지 않았다면)
         $pending = Join-Path $script:LWRoot 'pending-choices.json'
         $choices.HandoffFrom = $script:AdminHandoff.OldUser
         $choices.HandoffCopyFiles = [bool]$script:AdminHandoff.CopyFiles
         $choices.HandoffKeepOld = [bool]$script:AdminHandoff.KeepOld
         $choices.HandoffProfile = $script:AdminHandoff.OldProfile
         $choices | ConvertTo-Json -Depth 4 | Set-Content $pending -Encoding UTF8
+        $target = $script:AdminHandoff.Target
         $exe = Join-Path $script:LWRoot 'bin\LiteWinSettings.exe'
         $act = New-ScheduledTaskAction -Execute $exe -Argument '-ApplyPending'
-        $trg = New-ScheduledTaskTrigger -AtLogOn -User $script:AdminHandoff.Admin
-        $prn = New-ScheduledTaskPrincipal -UserId $script:AdminHandoff.Admin -LogonType Interactive -RunLevel Highest
+        $trg = New-ScheduledTaskTrigger -AtLogOn -User $target
+        $prn = New-ScheduledTaskPrincipal -UserId $target -LogonType Interactive -RunLevel Highest
         Register-ScheduledTask -TaskPath '\LiteWin\' -TaskName 'LiteWin Admin Handoff' -Action $act -Trigger $trg -Principal $prn -Force | Out-Null
-        Set-RegValue 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' 'AutoAdminLogon' '0' String
-        Set-RegValue 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' 'DefaultUserName' $script:AdminHandoff.Admin String
-        [Windows.Forms.MessageBox]::Show("지금 로그아웃합니다. Administrator 로 로그인하면 고른 설정이 적용되고, '$($script:AdminHandoff.OldUser)' 계정이 지워집니다.", 'LiteWin') | Out-Null
+        $wl = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+        Set-RegValue $wl 'DefaultUserName' $target String
+        Set-RegValue $wl 'DefaultDomainName' $env:COMPUTERNAME String
+        if ($script:AdminHandoff.AutoLogon) {
+            # 암호 없는 새 계정: 한 번만 자동 로그인 (암호를 저장하지 않음)
+            Set-RegValue $wl 'AutoAdminLogon' '1' String; Set-RegValue $wl 'DefaultPassword' '' String; Set-RegValue $wl 'AutoLogonCount' 1
+        } else {
+            Set-RegValue $wl 'AutoAdminLogon' '0' String
+            Remove-ItemProperty $wl -Name 'DefaultPassword', 'AutoLogonCount' -ErrorAction SilentlyContinue
+        }
+        $how = if ($script:AdminHandoff.AutoLogon) { '자동으로 로그인되면' } else { "'$target' 에 암호를 넣어 로그인하면" }
+        $old = if ($FirstRun) { '설치용 임시 계정은 지워집니다' } else { "'$($script:AdminHandoff.OldUser)' 계정이 지워집니다" }
+        if ($script:AdminHandoff.KeepOld) { $old = "'$($script:AdminHandoff.OldUser)' 계정은 남겨 둡니다" }
+        [Windows.Forms.MessageBox]::Show("이제 로그아웃합니다. $how 고른 설정이 적용되고, $old.", 'LiteWin') | Out-Null
         $script:LogoffAfter = $true
         $script:ActiveForm.Close(); return
     }
@@ -633,7 +742,7 @@ if ($ApplyPending) {
                 $u = Get-LocalUser -Name $pc.HandoffFrom -ErrorAction Stop
                 Get-CimInstance Win32_UserProfile | Where-Object { $_.SID -eq $u.SID.Value } | Remove-CimInstance -ErrorAction SilentlyContinue
                 Remove-LocalUser -Name $pc.HandoffFrom -ErrorAction Stop
-                Write-LWLog "이전 계정 '$($pc.HandoffFrom)' 삭제 (Administrator 하나만 사용)"
+                Write-LWLog "이전 계정 '$($pc.HandoffFrom)' 삭제"
             } catch { Write-LWLog "이전 계정 삭제 실패: $_" WARN }
         }
         $file = Join-Path $env:TEMP 'litewin-pending.json'
@@ -651,7 +760,9 @@ function New-SetupWizard {
         설정 창의 각 탭 내용을 그대로 가져와 단계로 보여 주므로, 나중에 LiteWin 설정에서 고치는 내용과 같다.
     #>
     $steps = @(
-        @{ Tab = '계정';       Title = '계정 만들기';        Desc = '이 PC 에서 쓸 이름과 암호를 정하세요. 비워 두면 "user" 로 만듭니다.'; SkipClears = $false }
+        @{ Tab = '계정 종류';  Title = '계정 만들기';        Desc = '로컬 계정을 만듭니다. Microsoft 계정 로그인은 필요 없습니다.'; SkipClears = $false; NoSkip = $true }
+        @{ Tab = '로컬 계정';  Title = '로컬 계정 만들기';   Desc = '이름과 암호를 정하세요.'; SkipClears = $false; Cond = 'user' }
+        @{ Tab = 'Administrator 암호'; Title = 'Administrator 계정'; Desc = '기본 제공 Administrator 계정을 켭니다.'; SkipClears = $false; Cond = 'admin'; NoSkip = $true }
         @{ Tab = '브라우저';   Title = '브라우저';           Desc = '기본으로 쓸 브라우저를 고르세요. 다른 브라우저도 함께 설치할 수 있습니다.'; SkipClears = $false }
         @{ Tab = '모드';       Title = '조작 방식과 화면';   Desc = '평소 쓰던 Windows 그대로, 맥처럼 입력, 또는 맥처럼 입력하고 보이게 중에서 고르세요.'; SkipClears = $false }
         @{ Tab = '테마';       Title = '배경과 색';          Desc = '배경화면과 다크/라이트 모드를 고르세요. 누르면 바로 바뀝니다.'; SkipClears = $false }
@@ -692,11 +803,18 @@ function New-SetupWizard {
         $bBack.Enabled = $nav.I -gt 0
         $last = $nav.I -eq $pages.Count - 1
         $bNext.Text = if ($last) { '설정 마치기' } else { '다음' }
-        $bSkip.Visible = $nav.I -gt 0   # 계정 단계는 이름을 비워 두면 그대로 'user'
+        $bSkip.Visible = -not $pg.Step.NoSkip   # 계정 종류·Administrator 암호는 건너뛸 수 없음 (로컬 계정은 비워 두면 'user')
     }
     $go = {
         param([int]$delta)
         $n = $nav.I + $delta
+        # 고른 계정 종류에 맞지 않는 단계는 건너뛴다 (일반 → 로컬 계정 / Administrator → 암호)
+        while ($n -ge 0 -and $n -lt $pages.Count -and $pages[$n].Step.Cond) {
+            $c = $pages[$n].Step.Cond
+            $useAdm = [bool]($cbUseAdmin -and $cbUseAdmin.Checked)
+            if (($c -eq 'admin' -and $useAdm) -or ($c -eq 'user' -and -not $useAdm)) { break }
+            $n += $(if ($delta -lt 0) { -1 } else { 1 })
+        }
         if ($n -ge $pages.Count) { Start-Apply $true; return }
         if ($n -lt 0) { return }
         $nav.I = $n; & $show

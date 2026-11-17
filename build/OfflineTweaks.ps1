@@ -30,6 +30,8 @@ $script:OfflineRegTweaks = @(
 
     # ---------- 설치(OOBE): 로컬 계정 허용 ----------
     @{ Hive='SOFTWARE'; Path='Microsoft\Windows\CurrentVersion\OOBE'; Name='BypassNRO'; Type='DWord'; Value=1 }
+    # 새 계정 첫 로그인 때 '개인 정보 설정 선택' 화면을 다시 띄우지 않음 (설치 때 ProtectYourPC=3 으로 이미 정함)
+    @{ Hive='SOFTWARE'; Path='Policies\Microsoft\Windows\OOBE'; Name='DisablePrivacyExperience'; Type='DWord'; Value=1 }
 
     # ---------- 서비스(오프라인으로 미리 끔) ----------
     @{ Hive='SYSTEM'; Path='ControlSet001\Services\DiagTrack'; Name='Start'; Type='DWord'; Value=4 }

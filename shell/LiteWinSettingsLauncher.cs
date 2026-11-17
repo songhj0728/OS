@@ -2,7 +2,7 @@
 //  * 관리자 권한 요청이 실행 파일 매니페스트에 들어 있어 UAC 확인 한 번으로 바로 열린다
 //    (바로가기 → PowerShell → 관리자 PowerShell 로 창이 두 번 깜빡이던 문제 해결)
 //  * PowerShell 을 이 프로세스 안에서 직접 돌린다(별도 콘솔 없음)
-//  * 사용:  LiteWinSettings.exe [-FirstRun]
+//  * 사용:  LiteWinSettings.exe [-FirstRun] [-ApplyPending]
 // 빌드: build\Compile-LiteWinTools.ps1 (C# 5, .NET Framework 4.x)
 using System;
 using System.IO;
@@ -29,10 +29,13 @@ static class LiteWinSettingsLauncher
             return 1;
         }
 
-        bool firstRun = false;
+        bool firstRun = false, applyPending = false;
         foreach (string a in args)
-            if (a.Equals("-FirstRun", StringComparison.OrdinalIgnoreCase) || a.Equals("/FirstRun", StringComparison.OrdinalIgnoreCase))
-                firstRun = true;
+        {
+            string n = a.TrimStart('-', '/');
+            if (n.Equals("FirstRun", StringComparison.OrdinalIgnoreCase)) firstRun = true;
+            if (n.Equals("ApplyPending", StringComparison.OrdinalIgnoreCase)) applyPending = true;
+        }
 
         InitialSessionState iss = InitialSessionState.CreateDefault();
         iss.ExecutionPolicy = Microsoft.PowerShell.ExecutionPolicy.Bypass;
@@ -49,6 +52,7 @@ static class LiteWinSettingsLauncher
                     ps.Runspace = rs;
                     ps.AddCommand(script);
                     if (firstRun) ps.AddParameter("FirstRun");
+                    if (applyPending) ps.AddParameter("ApplyPending");
                     ps.Invoke();
                     if (ps.HadErrors && ps.Streams.Error.Count > 0)
                     {
