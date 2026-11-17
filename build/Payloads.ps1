@@ -39,6 +39,16 @@ function Save-WingetPayloads([string]$Dest) {
                 --accept-package-agreements --accept-source-agreements --disable-interactivity 2>&1 | Out-String }
         }
         $installer = Get-ChildItem $dir -File | Where-Object { $_.Extension -in '.exe', '.msi' } | Select-Object -First 1
+        if (-not $installer) {
+            # winget 이 zip 안에 설치 프로그램을 넣어 배포하는 경우 (예: RetroBar = zip + inno) — 해시는 winget 이 이미 확인함
+            $wzip = Get-ChildItem $dir -File -Filter *.zip | Select-Object -First 1
+            if ($wzip) {
+                $x = Join-Path $dir 'x'; Expand-Archive $wzip.FullName $x -Force
+                $inner = Get-ChildItem $x -Recurse -File | Where-Object { $_.Extension -in '.exe', '.msi' } | Sort-Object { $_.Name -notmatch '(setup|install)' } | Select-Object -First 1
+                if ($inner) { Copy-Item $inner.FullName $dir -Force; $installer = Get-Item (Join-Path $dir $inner.Name) }
+                Remove-Item $x -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
         $yaml = Get-ChildItem $dir -File -Filter *.yaml | Select-Object -First 1
         $fromGitHub = $false
         if (-not $installer -and $p.Url) {
@@ -75,7 +85,8 @@ function Save-WingetPayloads([string]$Dest) {
         }
         if (-not $installer) { Warn "$($p.Id): 다운로드 실패 — 건너뜀 (설치 후 인터넷으로 받음)"; continue }
         $yamlText = if ($yaml) { Get-Content $yaml.FullName -Raw } else { '' }
-        $type = if ($yamlText -match '(?m)^\s*InstallerType:\s*(\S+)') { $Matches[1].ToLower() } elseif ($installer.Extension -eq '.msi') { 'msi' } else { 'exe' }
+        $type = if ($yamlText -match '(?m)^\s*NestedInstallerType:\s*(\S+)') { $Matches[1].ToLower() }
+                elseif ($yamlText -match '(?m)^\s*InstallerType:\s*(\S+)') { $Matches[1].ToLower() } elseif ($installer.Extension -eq '.msi') { 'msi' } else { 'exe' }
         $silent = if ($yamlText -match '(?m)^\s*Silent:\s*(.+)$') { $Matches[1].Trim().Trim("'").Trim('"') } else { '' }
         $args2 = if ($p.Args) { $p.Args } else { Get-SilentArgs $type $silent }
         if ($installer.Extension -eq '.zip') { $type = 'zip'; $args2 = 'portable' }

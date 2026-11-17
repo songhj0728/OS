@@ -45,7 +45,9 @@ if ($p.DisableHibernation) {
 $polFile = Join-Path $root 'policies.json'
 if (Test-Path $polFile) {
     $n = 0
-    foreach ($t in @(Get-Content $polFile -Raw -Encoding UTF8 | ConvertFrom-Json)) {
+    # 주의: @(... | ConvertFrom-Json) 은 PowerShell 5.1 에서 배열 전체를 항목 하나로 묶는다 → 변수에 받은 뒤 돈다
+    $policies = Get-Content $polFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    foreach ($t in $policies) {
         try {
             $sub = if ($t.Hive -eq 'SYSTEM') { 'SYSTEM\' + ($t.Path -replace '^ControlSet001', 'CurrentControlSet') } else { 'SOFTWARE\' + $t.Path }
             if ($sub -like 'SYSTEM\Setup\*') { continue }

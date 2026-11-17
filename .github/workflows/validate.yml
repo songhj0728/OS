@@ -22,6 +22,8 @@ jobs:
           }
           Get-ChildItem profiles\*.psd1 | ForEach-Object { [void](Import-PowerShellDataFile $_.FullName) }
           [void](Get-Content apps\catalog.json -Raw -Encoding UTF8 | ConvertFrom-Json)
+          # PowerShell 5.1: @(... | ConvertFrom-Json) 은 JSON 배열 전체를 항목 하나로 묶는다 (설치 프로그램이 하나도 안 깔리던 원인)
+          Get-ChildItem -Recurse -Include *.ps1 | Select-String -Pattern '@\([^#]*\|\s*ConvertFrom-Json\s*\)' | ForEach-Object { $bad++; Write-Host "::error file=$($_.Path),line=$($_.LineNumber)::wrap ConvertFrom-Json output in a variable instead of @()" }
           if ($bad) { exit 1 }
 
       - name: Compile C# tools (.NET Framework, same as build)

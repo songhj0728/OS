@@ -108,7 +108,9 @@ function Restore-RegSnapshot {
     param([Parameter(Mandatory)][string]$Name)
     $file = Join-Path $script:LWUserDir "snapshot-$Name.json"
     if (-not (Test-Path $file)) { return $false }
-    foreach ($e in @(Get-Content $file -Raw -Encoding UTF8 | ConvertFrom-Json)) {
+    # 주의: @(... | ConvertFrom-Json) 은 PowerShell 5.1 에서 배열 전체를 항목 하나로 묶는다 → 변수에 받은 뒤 돈다
+    $entries = Get-Content $file -Raw -Encoding UTF8 | ConvertFrom-Json
+    foreach ($e in $entries) {
         if ($e.Exists) {
             $v = if ($e.Type -eq 'Binary') { [Convert]::FromBase64String($e.Value) }
                  elseif ($e.Type -eq 'MultiString') { [string[]]$e.Value }

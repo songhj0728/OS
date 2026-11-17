@@ -7,7 +7,9 @@ function Install-LWPayloads {
     param([Parameter(Mandatory)][string]$PayloadDir, [int]$TimeoutMinutes = 10)
     $json = Join-Path $PayloadDir 'payloads.json'
     if (-not (Test-Path $json)) { "payloads.json 없음 — 건너뜀"; return }
-    foreach ($pl in @(Get-Content $json -Raw -Encoding UTF8 | ConvertFrom-Json)) {
+    # 주의: @(... | ConvertFrom-Json) 은 PowerShell 5.1 에서 배열 전체를 항목 하나로 묶는다 → 변수에 받은 뒤 돈다
+    $items = Get-Content $json -Raw -Encoding UTF8 | ConvertFrom-Json
+    foreach ($pl in $items) {
         if (-not $pl -or -not $pl.File) { continue }
         $file = Join-Path $PayloadDir $pl.File
         if (-not (Test-Path $file)) { "없음: $($pl.File)"; continue }
