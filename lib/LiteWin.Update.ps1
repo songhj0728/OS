@@ -33,6 +33,7 @@ function ConvertTo-LWVersion([string]$s) {
 function Get-LWLatestRelease {
     $repo = Get-LWUpdateRepo
     $h = @{ 'User-Agent' = 'LiteWin-Updater'; 'Accept' = 'application/vnd.github+json' }
+    if ($env:GITHUB_TOKEN) { $h['Authorization'] = "Bearer $env:GITHUB_TOKEN" }   # CI 전용 (사용자 PC 에는 없음)
     $r = Invoke-RestMethod -UseBasicParsing -Headers $h -Uri "https://api.github.com/repos/$repo/releases/latest" -TimeoutSec 30
     $a = $r.assets | Where-Object name -eq 'LiteWin-update.zip' | Select-Object -First 1
     if (-not $a) { throw "최신 Release 에 LiteWin-update.zip 이 없습니다 ($repo)" }

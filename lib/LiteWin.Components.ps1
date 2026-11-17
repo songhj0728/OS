@@ -81,6 +81,7 @@ function Get-GitHubRelease {
     <# 최신 정식 릴리스 + 지정 자산. 배포 후 DelayDays 가 지나지 않았으면 그 이전 릴리스 중 가장 최신 #>
     param([string]$Repo, [string]$Asset, [int]$DelayDays = 7, [string]$AssetPattern)
     $h = @{ 'User-Agent' = 'LiteWin-Components'; 'Accept' = 'application/vnd.github+json' }
+    if ($env:GITHUB_TOKEN) { $h['Authorization'] = "Bearer $env:GITHUB_TOKEN" }   # CI 전용 (사용자 PC 에는 없음)
     $rels = Invoke-RestMethod -UseBasicParsing -Headers $h -Uri "https://api.github.com/repos/$Repo/releases?per_page=15" -TimeoutSec 30
     foreach ($r in $rels) {
         if ($r.draft -or $r.prerelease) { continue }
