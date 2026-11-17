@@ -233,6 +233,21 @@ jobs:
             $list | Format-Table Name, IsAdmin, HasPassword, Picture -AutoSize | Out-String | Write-Host
           } finally { Remove-LocalUser -Name $n -ErrorAction SilentlyContinue }
 
+
+      - name: Registry snapshot save/restore (several entries incl. binary)
+        shell: powershell
+        run: |
+          . .\lib\LiteWin.Common.ps1
+          $k = 'HKCU:\Software\LiteWinTest\Snap'
+          Set-RegValue $k 'Bin' ([byte[]](1..48)) Binary; Set-RegValue $k 'Num' 7; Set-RegValue $k 'Str' 'a' String
+          Save-RegSnapshot -Name 'citest' -Force -Entries @(@{ Path = $k; Name = 'Bin' }, @{ Path = $k; Name = 'Num' }, @{ Path = $k; Name = 'Str' }, @{ Path = $k; Name = 'Missing' })
+          Set-RegValue $k 'Bin' ([byte[]](9, 9)) Binary; Set-RegValue $k 'Num' 1; Set-RegValue $k 'Missing' 5
+          if (-not (Restore-RegSnapshot -Name 'citest')) { exit 1 }
+          $p = Get-ItemProperty $k
+          if ($p.Bin.Length -ne 48 -or $p.Num -ne 7 -or $p.Str -ne 'a' -or $null -ne $p.Missing) { Write-Host "::error::snapshot restore wrong: $($p | Out-String)"; exit 1 }
+          Remove-Item 'HKCU:\Software\LiteWinTest' -Recurse -Force
+          Write-Host 'snapshot ok'
+
   shell-payloads:
     # 빌드 → 설치 마지막 단계(SYSTEM) → 사용자 로그인 순서를 그대로 재현해서 RetroBar / Open-Shell 이 실제로 깔리고 뜨는지 확인
     runs-on: windows-latest

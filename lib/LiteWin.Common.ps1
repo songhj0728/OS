@@ -111,14 +111,17 @@ function Restore-RegSnapshot {
     # 주의: @(... | ConvertFrom-Json) 은 PowerShell 5.1 에서 배열 전체를 항목 하나로 묶는다 → 변수에 받은 뒤 돈다
     $entries = Get-Content $file -Raw -Encoding UTF8 | ConvertFrom-Json
     foreach ($e in $entries) {
-        if ($e.Exists) {
-            $v = if ($e.Type -eq 'Binary') { [Convert]::FromBase64String($e.Value) }
-                 elseif ($e.Type -eq 'MultiString') { [string[]]$e.Value }
-                 else { $e.Value }
-            Set-RegValue -Path $e.Path -Name $e.Name -Value $v -Type $e.Type
-        } elseif (Test-Path -LiteralPath $e.Path) {
-            Remove-ItemProperty -LiteralPath $e.Path -Name $e.Name -ErrorAction SilentlyContinue
-        }
+        # 항목 하나가 깨져 있어도(예전 버전이 저장한 파일 등) 나머지는 복원하고 모드 전환은 계속한다
+        try {
+            if ($e.Exists) {
+                $v = if ($e.Type -eq 'Binary') { [Convert]::FromBase64String([string]$e.Value) }
+                     elseif ($e.Type -eq 'MultiString') { [string[]]$e.Value }
+                     else { $e.Value }
+                Set-RegValue -Path $e.Path -Name $e.Name -Value $v -Type $e.Type
+            } elseif (Test-Path -LiteralPath $e.Path) {
+                Remove-ItemProperty -LiteralPath $e.Path -Name $e.Name -ErrorAction SilentlyContinue
+            }
+        } catch { Write-LWLog "설정 복원 건너뜀: $($e.Path)\$($e.Name) — $($_.Exception.Message)" WARN }
     }
     return $true
 }

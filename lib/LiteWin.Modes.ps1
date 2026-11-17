@@ -33,10 +33,13 @@ function Get-UiSnapshotEntries {
 
 function Set-TaskbarAutoHide([bool]$On) {
     $e = Get-RegValueEntry -Path $script:StuckRectsKey -Name 'Settings'
-    if (-not $e) { return }
-    $b = [Convert]::FromBase64String($e.Value)
-    $b[8] = if ($On) { 0x03 } else { 0x02 }
-    Set-RegValue $script:StuckRectsKey 'Settings' $b Binary
+    if (-not $e -or $e.Type -ne 'Binary') { return }
+    try {
+        $b = [Convert]::FromBase64String([string]$e.Value)
+        if ($b.Length -le 8) { return }
+        $b[8] = if ($On) { 0x03 } else { 0x02 }
+        Set-RegValue $script:StuckRectsKey 'Settings' $b Binary
+    } catch { Write-LWLog "작업표시줄 자동 숨기기 설정 실패: $($_.Exception.Message)" WARN }
 }
 
 
