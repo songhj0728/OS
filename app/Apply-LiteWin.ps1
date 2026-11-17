@@ -69,6 +69,14 @@ if ($c.Mode -ne 'MacUI' -and "$($shell.ClassicEngine)" -ne 'retrobar' -and -not 
     }
 }
 
+# ---- 2-3. RetroBar 실행 환경: .NET 10 데스크톱 런타임 ----
+$rbExe = @("$env:ProgramFiles\RetroBar\RetroBar.exe", "${env:ProgramFiles(x86)}\RetroBar\RetroBar.exe", "$env:LOCALAPPDATA\Programs\RetroBar\RetroBar.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+$needRb = $c.Mode -ne 'MacUI' -and ("$($shell.ClassicEngine)" -eq 'retrobar' -or -not (Test-Path "$env:ProgramFiles\ExplorerPatcher\ExplorerPatcher.amd64.dll"))
+if ($rbExe -and $needRb -and -not (Get-ChildItem "$env:ProgramFiles\dotnet\shared\Microsoft.WindowsDesktop.App\10.*" -Directory -ErrorAction SilentlyContinue)) {
+    Set-LWProgress 32 'RetroBar 실행 환경(.NET 10) 설치'
+    if (-not (Invoke-Winget -Id 'Microsoft.DotNet.DesktopRuntime.10' -Scope machine)) { $failed += '.NET 10 데스크톱 런타임 (RetroBar)' }
+}
+
 # ---- 3. 앱 설치 ----
 Set-LWProgress 35 '추가 프로그램 설치'
 $failed += Install-LWApps -Ids $apps

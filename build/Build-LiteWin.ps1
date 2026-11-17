@@ -86,7 +86,9 @@ $Payloads = @(
     @{ Name = 'mpc-be';     Id = 'MPC-BE.MPC-BE';               Args = ''; Repo = 'Aleksoid1978/MPC-BE'; Pattern = 'x64.*installer.*\.(zip|exe)$'; FallbackArgs = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-' }
     @{ Name = 'imageglass'; Id = 'DuongDieuPhap.ImageGlass';    Args = ''; Repo = 'd2phap/ImageGlass';   Pattern = 'x64\.msi$' }
     @{ Name = 'retrobar';   Id = 'dremin.RetroBar';             Args = ''; Repo = 'dremin/RetroBar';     Pattern = 'Installer\.(zip|exe)$'; FallbackArgs = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-'; PortableDir = 'RetroBar' }
-    @{ Name = 'dotnet-desktop'; Id = 'Microsoft.DotNet.DesktopRuntime.10'; Args = '/install /quiet /norestart' }   # RetroBar 실행에 필요
+    # RetroBar 1.22+ 실행에 필요. winget 이 실패하면 Microsoft 공식 최신 링크에서 받고 Microsoft 서명을 확인한다
+    @{ Name = 'dotnet-desktop'; Id = 'Microsoft.DotNet.DesktopRuntime.10'; Args = '/install /quiet /norestart'
+       Url = 'https://aka.ms/dotnet/10.0/windowsdesktop-runtime-win-x64.exe'; Signer = 'Microsoft Corporation' }
     @{ Name = 'openshell';  Id = 'Open-Shell.Open-Shell-Menu';  Args = '/qn ADDLOCAL=StartMenu' }   # Win7 시작 메뉴
 )
 
@@ -116,6 +118,17 @@ function Save-WingetPayloads([string]$Dest) {
         $installer = Get-ChildItem $dir -File | Where-Object { $_.Extension -in '.exe', '.msi' } | Select-Object -First 1
         $yaml = Get-ChildItem $dir -File -Filter *.yaml | Select-Object -First 1
         $fromGitHub = $false
+        if (-not $installer -and $p.Url) {
+            Warn "$($p.Id): winget 다운로드 실패 → 공식 링크에서 받습니다"
+            try {
+                $f = Join-Path $dir "$($p.Name).exe"
+                Invoke-WebRequest -UseBasicParsing -Uri $p.Url -OutFile $f
+                $sig = Get-AuthenticodeSignature $f
+                if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch [regex]::Escape($p.Signer)) {
+                    Remove-Item $f -Force; Warn "$($p.Id): 서명 확인 실패 — 사용하지 않음"
+                } else { $installer = Get-Item $f; $fromGitHub = $true }
+            } catch { Warn "$($p.Id): 공식 링크도 실패 — $($_.Exception.Message)" }
+        }
         if (-not $installer -and $p.Repo) {
             $why = (("$wgOut" -split "`r?`n" | Where-Object { $_.Trim() -and $_ -notmatch '^[\s\-\\|/█▒]+$' } | Select-Object -Last 2) -join ' / ')
             Warn "$($p.Id): winget 다운로드 실패 ($why) → GitHub 공식 릴리스($($p.Repo))에서 받습니다"

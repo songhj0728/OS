@@ -110,11 +110,15 @@ function Add-CatalogSection($panel, [string]$categoryId, [int]$indent = 0) {
     }
 }
 
-# ============================================================== 탭 0: 계정 (첫 실행에서만)
-$acct = $null
-if ($FirstRun) {
+# ============================================================== 탭 0: 계정 (처음 설정 + 나중에도 변경 가능)
+$acct = $true
+$isBuiltinAdmin = ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value -like 'S-1-5-*-500')
+$uacKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+$uacNoPrompt = ((Get-ItemProperty $uacKey -ErrorAction SilentlyContinue).ConsentPromptBehaviorAdmin -eq 0)
+if ($true) {
     $p0 = New-Page '계정'
-    [void](Add-Label $p0 '이 PC 에서 쓸 이름을 정하세요. 비워 두면 "user" 로 만듭니다.' $bold)
+    if ($FirstRun) { [void](Add-Label $p0 '이 PC 에서 쓸 이름을 정하세요. 비워 두면 "user" 로 만듭니다.' $bold) }
+    else { [void](Add-Label $p0 "현재 계정: $env:USERNAME$(if ($isBuiltinAdmin) { '  (기본 제공 Administrator)' })   — 이름과 암호를 바꾸려면 아래에 입력하세요." $bold) }
     function New-TextRow($panel, [string]$label, [switch]$Password) {
         $row = New-Object Windows.Forms.FlowLayoutPanel; $row.AutoSize = $true; $row.WrapContents = $false
         $row.Margin = New-Object Windows.Forms.Padding(12, 4, 3, 2)
@@ -123,19 +127,32 @@ if ($FirstRun) {
         $row.Controls.AddRange(@($l, $t)); $panel.Controls.Add($row); return $t
     }
     $txtName  = New-TextRow $p0 '사용자 이름'
-    $txtPw    = New-TextRow $p0 '암호 (선택)' -Password
+    if (-not $FirstRun) { $txtName.Text = $env:USERNAME }
+    $txtPw    = New-TextRow $p0 $(if ($FirstRun) { '암호 (선택)' } else { '새 암호 (선택)' }) -Password
     $txtPw2   = New-TextRow $p0 '암호 확인' -Password
     [void](Add-Label $p0 '    암호를 비워 두면 암호 없이 로그인합니다. 다른 사람이 쓰는 PC 라면 암호를 정하세요.' $small $gray)
 
     [void](Add-Label $p0 '계정 종류' $bold $null 14)
-    $rbAcctUser  = Add-Radio $p0 '일반 계정 (권장) — 위 이름으로, 필요할 때만 관리자 권한 확인' $true
+    $rbAcctUser  = Add-Radio $p0 '관리자 계정 (권장) — 프로그램 설치 등 필요할 때만 확인 창' (-not $uacNoPrompt)
     $rbAcctUser.Font = $font
-    $rbAcctAdmin = Add-Radio $p0 'Administrator 계정 하나만 사용 — 위 계정을 지우고 기본 제공 Administrator 로 바꿈' $false
+    $rbAcctNoPrompt = Add-Radio $p0 '확인 창 없는 관리자 — 지금 계정과 파일을 그대로 두고, 관리자 확인 창(UAC)만 묻지 않게' $uacNoPrompt
+    $rbAcctNoPrompt.Font = $font
+    $rbAcctAdmin = Add-Radio $p0 '기본 제공 Administrator 로 전환 — 파일을 옮기고 그 계정으로 바꿈' $false
     $rbAcctAdmin.Font = $font
+    if ($isBuiltinAdmin) { $rbAcctAdmin.Enabled = $false; $rbAcctAdmin.Text += '  (이미 사용 중)' }
     $txtAdm  = New-TextRow $p0 'Administrator 암호' -Password
     $txtAdm2 = New-TextRow $p0 '암호 확인' -Password
-    $txtAdm.Enabled = $false; $txtAdm2.Enabled = $false
+    $cbCopyFiles = Add-Check $p0 '바탕 화면·문서·다운로드·사진·음악·동영상·즐겨찾기를 새 계정으로 복사' $true 24
+    $cbKeepOld   = Add-Check $p0 '기존 계정은 지우지 않고 남겨 두기 (복사가 끝난 뒤 직접 지울 수 있음)' $false 24
+    [void](Add-Label $p0 '    프로그램 설정·로그인 정보 같은 계정별 데이터는 옮겨지지 않습니다 (Windows 가 계정 사이 이전을 지원하지 않음). 파일은 그대로 복사됩니다.' $small $gray)
+    $txtAdm.Enabled = $false; $txtAdm2.Enabled = $false; $cbCopyFiles.Enabled = $false; $cbKeepOld.Enabled = $false
     $script:adminConfirmed = $false
+    $rbAcctNoPrompt.add_CheckedChanged({
+        if ($rbAcctNoPrompt.Checked -and -not $uacNoPrompt) {
+            $m = "관리자 확인 창(UAC)을 끄면, 관리자 권한이 필요한 프로그램이 묻지 않고 바로 실행됩니다.`n`n- 악성 프로그램도 확인 창 없이 시스템을 바꿀 수 있습니다`n- 계정과 파일은 그대로입니다. 나중에 다시 켤 수 있습니다`n`n계속할까요?"
+            if ([Windows.Forms.MessageBox]::Show($m, '보안 경고', 'YesNo', 'Warning', 'Button2') -ne 'Yes') { $rbAcctUser.Checked = $true }
+        }
+    })
     $rbAcctAdmin.add_CheckedChanged({
         if ($rbAcctAdmin.Checked -and -not $script:adminConfirmed) {
             $m1 = "기본 제공 Administrator 계정은 사용자 계정 컨트롤(UAC) 확인 없이 모든 프로그램이 최고 권한으로 실행됩니다.`n`n" +
@@ -143,7 +160,7 @@ if ($FirstRun) {
             $r1 = [Windows.Forms.MessageBox]::Show($m1, '보안 경고 (1/2)', 'YesNo', 'Warning', 'Button2')
             $r2 = 'No'
             if ($r1 -eq 'Yes') {
-                $r2 = [Windows.Forms.MessageBox]::Show("한 번 더 확인합니다.`n`n지금 계정('$env:USERNAME')과 그 안의 파일이 지워지고, 이 PC 에는 Administrator 계정 하나만 남습니다. Administrator 에는 반드시 암호를 정해야 합니다.`n`n정말 바꿀까요?", '보안 경고 (2/2)', 'YesNo', 'Warning', 'Button2')
+                $r2 = [Windows.Forms.MessageBox]::Show("한 번 더 확인합니다.`n`n로그아웃 후 Administrator 로 로그인하면 고른 폴더의 파일이 복사되고, '기존 계정 남겨 두기'를 고르지 않았다면 지금 계정('$env:USERNAME')은 지워집니다. Administrator 에는 반드시 암호를 정해야 합니다.`n`n정말 바꿀까요?", '보안 경고 (2/2)', 'YesNo', 'Warning', 'Button2')
             }
             if ($r2 -ne 'Yes') { $rbAcctUser.Checked = $true; return }
             $script:adminConfirmed = $true
@@ -151,12 +168,13 @@ if ($FirstRun) {
         $on = $rbAcctAdmin.Checked
         $txtAdm.Enabled = $on; $txtAdm2.Enabled = $on
         $txtName.Enabled = -not $on; $txtPw.Enabled = -not $on; $txtPw2.Enabled = -not $on
+        $cbCopyFiles.Enabled = $on; $cbKeepOld.Enabled = $on
     })
 
     function Invoke-AccountSetup {
         <# 창에서 바로 처리한다 (암호를 파일에 남기지 않기 위해). 실패하면 $false #>
         $name = $txtName.Text.Trim()
-        if (-not $name) { $name = 'user' }
+        if (-not $name) { $name = if ($FirstRun) { 'user' } else { $env:USERNAME } }
         if ($name.Length -gt 20 -or $name -match '["/\\\[\]:;|=,+*?<>@]') {
             [Windows.Forms.MessageBox]::Show('이름은 20자 이하이고 " / \ [ ] : ; | = , + * ? < > @ 를 쓸 수 없습니다.', 'LiteWin') | Out-Null; return $false
         }
@@ -172,9 +190,17 @@ if ($FirstRun) {
                 $adm = Get-LocalUser | Where-Object { $_.SID.Value -like 'S-1-5-*-500' } | Select-Object -First 1
                 Set-LocalUser -SID $adm.SID -Password (ConvertTo-SecureString $txtAdm.Text -AsPlainText -Force) -ErrorAction Stop
                 Enable-LocalUser -SID $adm.SID -ErrorAction Stop
-                $script:AdminHandoff = @{ OldUser = $me; Admin = $adm.Name }
-                Write-LWLog "Administrator 계정 하나만 사용 선택 (경고 2회 확인) — '$me' 는 Administrator 첫 로그인 때 삭제" WARN
+                $script:AdminHandoff = @{ OldUser = $me; Admin = $adm.Name; CopyFiles = $cbCopyFiles.Checked; KeepOld = $cbKeepOld.Checked; OldProfile = $env:USERPROFILE }
+                Write-LWLog "Administrator 로 전환 선택 (경고 2회 확인) — 파일 복사 $($cbCopyFiles.Checked), 기존 계정 유지 $($cbKeepOld.Checked)" WARN
                 return $true
+            }
+            # 관리자 확인 창(UAC): 0 = 묻지 않고 승인, 5 = 기본(확인)
+            $want = if ($rbAcctNoPrompt.Checked) { 0 } else { 5 }
+            $cur = (Get-ItemProperty $uacKey -ErrorAction SilentlyContinue).ConsentPromptBehaviorAdmin
+            if ($cur -ne $want) {
+                Set-RegValue $uacKey 'ConsentPromptBehaviorAdmin' $want
+                Set-RegValue $uacKey 'PromptOnSecureDesktop' $(if ($want -eq 0) { 0 } else { 1 })
+                Write-LWLog ("관리자 확인 창: " + $(if ($want -eq 0) { '끔 (경고 확인)' } else { '켬' }))
             }
             if ($name -ne $me) { Rename-LocalUser -Name $me -NewName $name -ErrorAction Stop }
             Set-LocalUser -Name $name -FullName $name -ErrorAction SilentlyContinue
@@ -213,9 +239,9 @@ $uiChecks = [ordered]@{}
 $uiChecks['DarkMode']        = Add-Check $p1 '다크 모드' ($curUi -contains 'DarkMode') 24
 $uiChecks['AutoHideTaskbar'] = Add-Check $p1 '작업표시줄 자동 숨기기 (Dock 처럼)' ($curUi -contains 'AutoHideTaskbar') 24
 $uiChecks['Transparency']    = Add-Check $p1 '투명 효과' ($curUi -contains 'Transparency') 24
-foreach ($id in 'quicklook', 'flow', 'windhawk') {
+foreach ($id in 'seelen', 'quicklook', 'flow', 'windhawk') {
     $app = $catalog.apps | Where-Object id -eq $id
-    $uiChecks[$id] = Add-Check $p1 ($app.name + '  — 설치 필요') ($curUi -contains $id) 24
+    $uiChecks[$id] = Add-Check $p1 ($app.name + '  — 설치 필요') ($curUi -contains $id -or ($id -eq 'seelen' -and -not $state.UiOptions)) 24
 }
 $capLabel = Add-Label $p1 '    창 버튼 (모든 창 왼쪽 위에 맥식 버튼 추가, 원래 버튼은 그대로)' $small $gray
 $cbCaption = New-Object Windows.Forms.ComboBox
@@ -424,6 +450,9 @@ $btnClose.Location = New-Object Drawing.Point(10, 515)
 $form.Controls.AddRange(@($btnApply, $btnSkip, $btnClose))
 $form.AcceptButton = $btnApply
 
+$script:ActiveForm = $form
+function Show-AccountPage { $tabs.SelectedIndex = 0 }
+
 function Start-Apply([bool]$installApps) {
     $br = Get-BrowserChoices
     if (-not $br) { return }
@@ -436,7 +465,7 @@ function Start-Apply([bool]$installApps) {
                "언제든 '라이트 윈도우'로 돌아가면 프로그램이 멈추고 원래 키 배치로 돌아갑니다. 켤까요?"
         if ([Windows.Forms.MessageBox]::Show($msg, '맥 입력 켜기', 'YesNo', 'Information') -ne 'Yes') { return }
     }
-    if ($FirstRun) { if (-not (Invoke-AccountSetup)) { $tabs.SelectedIndex = 0; return } }
+    if (-not (Invoke-AccountSetup)) { Show-AccountPage; return }
     try { Save-ComponentOptions } catch { }
     $mode = if ($rbUi.Checked) { 'MacUI' } elseif ($rbMac.Checked) { 'MacInput' } else { 'Lite' }
     $ui = @(); foreach ($k in $uiChecks.Keys) { if ($uiChecks[$k].Checked -and $mode -eq 'MacUI') { $ui += $k } }
@@ -445,7 +474,7 @@ function Start-Apply([bool]$installApps) {
         foreach ($k in $appChecks.Keys) { if ($appChecks[$k].Checked -and $appChecks[$k].Enabled) { $apps += $k } }
     }
     # 맥 UI 도구를 켰는데 설치 목록에 없으면 함께 설치
-    foreach ($id in 'quicklook', 'flow', 'windhawk') { if ($ui -contains $id -and $apps -notcontains $id) { $apps += $id } }
+    foreach ($id in 'seelen', 'quicklook', 'flow', 'windhawk') { if ($ui -contains $id -and $apps -notcontains $id) { $apps += $id } }
 
     $choices = [ordered]@{
         Mode = $mode; UiOptions = $ui; Apps = $apps; FirstRun = [bool]$FirstRun
@@ -462,6 +491,9 @@ function Start-Apply([bool]$installApps) {
         # Administrator 로 바꾸는 경우: 선택은 저장해 두고 Administrator 첫 로그인 때 적용한다
         $pending = Join-Path $script:LWRoot 'pending-choices.json'
         $choices.HandoffFrom = $script:AdminHandoff.OldUser
+        $choices.HandoffCopyFiles = [bool]$script:AdminHandoff.CopyFiles
+        $choices.HandoffKeepOld = [bool]$script:AdminHandoff.KeepOld
+        $choices.HandoffProfile = $script:AdminHandoff.OldProfile
         $choices | ConvertTo-Json -Depth 4 | Set-Content $pending -Encoding UTF8
         $exe = Join-Path $script:LWRoot 'bin\LiteWinSettings.exe'
         $act = New-ScheduledTaskAction -Execute $exe -Argument '-ApplyPending'
@@ -472,12 +504,12 @@ function Start-Apply([bool]$installApps) {
         Set-RegValue 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' 'DefaultUserName' $script:AdminHandoff.Admin String
         [Windows.Forms.MessageBox]::Show("지금 로그아웃합니다. Administrator 로 로그인하면 고른 설정이 적용되고, '$($script:AdminHandoff.OldUser)' 계정이 지워집니다.", 'LiteWin') | Out-Null
         $script:LogoffAfter = $true
-        $form.Close(); return
+        $script:ActiveForm.Close(); return
     }
     $file = Join-Path $env:TEMP ("litewin-choices-{0}.json" -f [guid]::NewGuid().ToString('N'))
     $choices | ConvertTo-Json -Depth 4 | Set-Content $file -Encoding UTF8
     $script:PendingFile = $file
-    $form.Close()
+    $script:ActiveForm.Close()
 }
 
 function Show-ApplyProgress {
@@ -559,7 +591,16 @@ if ($ApplyPending) {
     $pending = Join-Path $script:LWRoot 'pending-choices.json'
     if (Test-Path $pending) {
         $pc = Get-Content $pending -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($pc.HandoffFrom -and $pc.HandoffFrom -ne $env:USERNAME) {
+        if ($pc.HandoffCopyFiles -and $pc.HandoffProfile -and (Test-Path $pc.HandoffProfile)) {
+            foreach ($d in 'Desktop', 'Documents', 'Downloads', 'Pictures', 'Music', 'Videos', 'Favorites') {
+                $src = Join-Path $pc.HandoffProfile $d
+                if (Test-Path $src) {
+                    [void](Invoke-Hidden -File "$env:WINDIR\System32\robocopy.exe" -ArgumentList @($src, (Join-Path $env:USERPROFILE $d), '/E', '/XJ', '/R:1', '/W:1', '/NFL', '/NDL', '/NJH', '/NJS', '/NP'))
+                }
+            }
+            Write-LWLog "이전 계정 파일 복사 완료: $($pc.HandoffProfile) → $env:USERPROFILE"
+        }
+        if ($pc.HandoffFrom -and $pc.HandoffFrom -ne $env:USERNAME -and -not $pc.HandoffKeepOld) {
             try {
                 $u = Get-LocalUser -Name $pc.HandoffFrom -ErrorAction Stop
                 Get-CimInstance Win32_UserProfile | Where-Object { $_.SID -eq $u.SID.Value } | Remove-CimInstance -ErrorAction SilentlyContinue
@@ -574,6 +615,78 @@ if ($ApplyPending) {
     }
     Unregister-ScheduledTask -TaskPath '\LiteWin\' -TaskName 'LiteWin Admin Handoff' -Confirm:$false -ErrorAction SilentlyContinue
     return
+}
+
+function New-SetupWizard {
+    <#
+        첫 설정 마법사: Windows 첫 설정(OOBE)처럼 한 화면씩 [다음] 으로 넘어간다.
+        설정 창의 각 탭 내용을 그대로 가져와 단계로 보여 주므로, 나중에 LiteWin 설정에서 고치는 내용과 같다.
+    #>
+    $steps = @(
+        @{ Tab = '계정';       Title = '계정 만들기';        Desc = '이 PC 에서 쓸 이름과 암호를 정하세요. 비워 두면 "user" 로 만듭니다.'; SkipClears = $false }
+        @{ Tab = '브라우저';   Title = '브라우저';           Desc = '기본으로 쓸 브라우저를 고르세요. 다른 브라우저도 함께 설치할 수 있습니다.'; SkipClears = $false }
+        @{ Tab = '모드';       Title = '조작 방식과 화면';   Desc = '평소 쓰던 Windows 그대로, 맥처럼 입력, 또는 맥처럼 입력하고 보이게 중에서 고르세요.'; SkipClears = $false }
+        @{ Tab = '테마';       Title = '배경과 색';          Desc = '배경화면과 다크/라이트 모드를 고르세요. 누르면 바로 바뀝니다.'; SkipClears = $false }
+        @{ Tab = '사진·동영상'; Title = '사진과 동영상';     Desc = '더 많은 형식이 필요하면 고르세요. 기본 앱만으로도 HEVC·HEIC 는 열립니다.'; SkipClears = $true }
+        @{ Tab = '게임';       Title = '게임';               Desc = '설치할 게임 플랫폼을 고르세요. 필요 없으면 [건너뛰기].'; SkipClears = $true }
+    )
+    $pages = @()
+    foreach ($st in $steps) {
+        $tp = $tabs.TabPages | Where-Object { $_.Text -eq $st.Tab } | Select-Object -First 1
+        if ($tp) { $pages += @{ Step = $st; Panel = $tp.Controls[0] } }
+    }
+
+    $w = New-Object Windows.Forms.Form
+    $w.FormBorderStyle = 'None'; $w.ShowInTaskbar = $false; $w.StartPosition = 'Manual'; $w.AutoScaleMode = 'None'
+    $w.BackColor = [Drawing.Color]::White; $w.Font = $font
+    $w.Size = New-Object Drawing.Size(780, 600)
+    $title = New-Object Windows.Forms.Label; $title.Font = New-Object Drawing.Font('Malgun Gothic', 18, [Drawing.FontStyle]::Bold)
+    $title.Location = New-Object Drawing.Point(36, 28); $title.AutoSize = $true
+    $desc = New-Object Windows.Forms.Label; $desc.ForeColor = $gray; $desc.Location = New-Object Drawing.Point(38, 72)
+    $desc.Size = New-Object Drawing.Size(700, 40)
+    $host2 = New-Object Windows.Forms.Panel; $host2.Location = New-Object Drawing.Point(26, 112); $host2.Size = New-Object Drawing.Size(728, 400)
+    $stepLbl = New-Object Windows.Forms.Label; $stepLbl.ForeColor = $gray; $stepLbl.AutoSize = $true; $stepLbl.Location = New-Object Drawing.Point(36, 540)
+    $bBack = New-Object Windows.Forms.Button; $bBack.Text = '뒤로'; $bBack.Size = New-Object Drawing.Size(96, 34); $bBack.Location = New-Object Drawing.Point(420, 532)
+    $bSkip = New-Object Windows.Forms.Button; $bSkip.Text = '건너뛰기'; $bSkip.Size = New-Object Drawing.Size(96, 34); $bSkip.Location = New-Object Drawing.Point(524, 532)
+    $bNext = New-Object Windows.Forms.Button; $bNext.Text = '다음'; $bNext.Size = New-Object Drawing.Size(120, 34); $bNext.Location = New-Object Drawing.Point(628, 532)
+    $bNext.BackColor = [Drawing.Color]::FromArgb(0, 103, 192); $bNext.ForeColor = [Drawing.Color]::White; $bNext.FlatStyle = 'Flat'
+    $bAll = New-Object Windows.Forms.LinkLabel; $bAll.Text = '모두 기본값으로 건너뛰기'; $bAll.AutoSize = $true; $bAll.Location = New-Object Drawing.Point(600, 30)
+    $w.Controls.AddRange(@($title, $desc, $host2, $stepLbl, $bBack, $bSkip, $bNext, $bAll))
+    $w.AcceptButton = $bNext
+
+    $nav = @{ I = 0 }
+    $show = {
+        $pg = $pages[$nav.I]
+        $host2.Controls.Clear()
+        $pg.Panel.Dock = 'Fill'; $host2.Controls.Add($pg.Panel)
+        $title.Text = $pg.Step.Title; $desc.Text = $pg.Step.Desc
+        $stepLbl.Text = ('{0} / {1}   ' -f ($nav.I + 1), $pages.Count) + ((0..($pages.Count - 1) | ForEach-Object { if ($_ -eq $nav.I) { '●' } else { '○' } }) -join ' ')
+        $bBack.Enabled = $nav.I -gt 0
+        $last = $nav.I -eq $pages.Count - 1
+        $bNext.Text = if ($last) { '설정 마치기' } else { '다음' }
+        $bSkip.Visible = $nav.I -gt 0   # 계정 단계는 이름을 비워 두면 그대로 'user'
+    }
+    $go = {
+        param([int]$delta)
+        $n = $nav.I + $delta
+        if ($n -ge $pages.Count) { Start-Apply $true; return }
+        if ($n -lt 0) { return }
+        $nav.I = $n; & $show
+    }
+    $bNext.add_Click({ & $go 1 })
+    $bBack.add_Click({ & $go -1 })
+    $bSkip.add_Click({
+        $pg = $pages[$nav.I]
+        if ($pg.Step.SkipClears) {
+            # 이 단계에서 고른 추가 설치를 모두 해제하고 넘어간다
+            foreach ($c in @($pg.Panel.Controls)) { if ($c -is [Windows.Forms.CheckBox]) { $c.Checked = $false } }
+        }
+        & $go 1
+    })
+    $bAll.add_LinkClicked({ Start-Apply $false })
+    $script:WizardNav = @{ Pages = $pages; Nav = $nav; Show = $show }
+    & $show
+    return $w
 }
 
 if ($FirstRun) {
@@ -601,17 +714,20 @@ if ($FirstRun) {
     $sub.BackColor = [Drawing.Color]::Transparent; $sub.ForeColor = $fg2
     $sub.Font = New-Object Drawing.Font('Malgun Gothic', [Math]::Max(12, [int]($titleSize * 0.55)), [Drawing.FontStyle]::Regular, [Drawing.GraphicsUnit]::Pixel)
     $back.Controls.AddRange(@($title, $sub))
+    # 점(.)으로 불러 이 스크립트 범위에서 실행 → 버튼 이벤트가 마법사 변수($nav, $go 등)를 계속 볼 수 있다
+    $wiz = . New-SetupWizard
+    $script:ActiveForm = $wiz
+    function Show-AccountPage { $script:WizardNav.Nav.I = 0; & $script:WizardNav.Show }
     $layout = {
         $top = [int]($screen.Height * 0.06)
         $title.Location = New-Object Drawing.Point([int](($screen.Width - $title.PreferredWidth) / 2), $top)
         $sub.Location = New-Object Drawing.Point([int](($screen.Width - $sub.PreferredWidth) / 2), $top + $title.PreferredHeight + 6)
         $formTop = $sub.Bottom + [int]($screen.Height * 0.03)
-        if ($formTop + $form.Height -gt $screen.Height - 10) { $formTop = [Math]::Max($sub.Bottom + 6, $screen.Height - $form.Height - 10) }
-        $form.StartPosition = 'Manual'
-        $form.Location = New-Object Drawing.Point([int]($screen.X + ($screen.Width - $form.Width) / 2), [int]($screen.Y + $formTop))
+        if ($formTop + $wiz.Height -gt $screen.Height - 10) { $formTop = [Math]::Max($sub.Bottom + 6, $screen.Height - $wiz.Height - 10) }
+        $wiz.Location = New-Object Drawing.Point([int]($screen.X + ($screen.Width - $wiz.Width) / 2), [int]($screen.Y + $formTop))
     }
     $back.Show(); & $layout
-    [void]$form.ShowDialog($back)
+    [void]$wiz.ShowDialog($back)
     if ($script:PendingFile) {
         $title.Text = '적용하는 중입니다…'; $sub.Text = '끝나면 바탕화면이 나타납니다.'
         & $layout

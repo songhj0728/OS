@@ -100,6 +100,37 @@ function Restart-Explorer {
     if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { Start-Process explorer.exe }
 }
 
+# ------------------------------------------------------------------ Seelen UI (맥 UI: 상단 메뉴바 + Dock)
+#   Store/winget 판은 MSIX 패키지라 실행은 shell:AppsFolder 로, 자동 시작은 패키지의 StartupTask 상태로 켜고 끈다.
+function Get-SeelenApp {
+    $pkg = Get-AppxPackage -Name '*Seelen*' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($pkg) {
+        $appId = 'App'
+        try { $appId = @((Get-AppxPackageManifest $pkg).Package.Applications.Application)[0].Id } catch { }
+        return [pscustomobject]@{ Kind = 'msix'; Pfn = $pkg.PackageFamilyName; Target = "shell:AppsFolder\$($pkg.PackageFamilyName)!$appId" }
+    }
+    foreach ($p in "$env:ProgramFiles\Seelen\Seelen UI\seelen-ui.exe", "$env:LOCALAPPDATA\Programs\Seelen UI\seelen-ui.exe") {
+        if (Test-Path $p) { return [pscustomobject]@{ Kind = 'exe'; Pfn = $null; Target = $p } }
+    }
+    return $null
+}
+
+function Set-SeelenState([bool]$On) {
+    $app = Get-SeelenApp
+    if (-not $app) { return $false }
+    if ($app.Pfn) {
+        # 패키지 시작 프로그램 상태: 2 = 켬, 1 = 꺼짐(사용자)
+        $base = "HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\SystemAppData\$($app.Pfn)"
+        foreach ($k in Get-ChildItem $base -ErrorAction SilentlyContinue) {
+            if ($null -ne (Get-ItemProperty $k.PSPath -Name State -ErrorAction SilentlyContinue)) { Set-RegValue $k.PSPath 'State' $(if ($On) { 2 } else { 1 }) }
+        }
+    }
+    $running = Get-Process -Name 'seelen-ui*', 'slu-service*' -ErrorAction SilentlyContinue
+    if ($On -and -not $running) { Start-Process $app.Target }
+    if (-not $On -and $running) { $running | Stop-Process -Force -ErrorAction SilentlyContinue }
+    return $true
+}
+
 function Test-EPInstalled {
     Test-Path "$env:ProgramFiles\ExplorerPatcher\ExplorerPatcher.amd64.dll"
 }
@@ -168,7 +199,14 @@ function Start-LWShell {
     # ---- RetroBar (예비 클래식 작업표시줄) ----
     $rb = Get-RetroBarExe
     if ($engine -eq 'retrobar' -and $rb) {
-        if (-not (Get-Process RetroBar -ErrorAction SilentlyContinue)) { Start-Process $rb }
+        if (-not (Get-Process RetroBar -ErrorAction SilentlyContinue)) {
+            if (-not (Get-ChildItem "$env:ProgramFiles\dotnet\shared\Microsoft.WindowsDesktop.App\10.*" -Directory -ErrorAction SilentlyContinue)) {
+                Write-LWLog 'RetroBar 를 실행할 .NET 10 데스크톱 런타임이 없습니다 — LiteWin 설정에서 [적용] 을 누르면 설치합니다' WARN
+            }
+            $rp = Start-Process $rb -PassThru
+            Start-Sleep -Seconds 4
+            if ($rp.HasExited) { Write-LWLog "RetroBar 가 바로 종료됨 (코드 $($rp.ExitCode))" WARN }
+        }
     } else {
         Stop-ProcessByPath 'RetroBar'
     }
@@ -184,6 +222,10 @@ function Start-LWShell {
             if (Get-Process StartMenu -ErrorAction SilentlyContinue) { & $os -exit 2>$null; Stop-ProcessByPath 'StartMenu' }
         }
     }
+
+    # ---- 맥 UI: Seelen UI (상단 메뉴바 + Dock) ----
+    $wantSeelen = $mac -and (@($State.UiOptions) -contains 'seelen')
+    [void](Set-SeelenState $wantSeelen)
 
     # ---- 창 버튼 오버레이 ----
     $capOn = $mac -and $o.Caption -in 'traffic', 'fullscreen'

@@ -17,7 +17,7 @@ $script:BuiltinUiOptions = [ordered]@{
     Transparency    = '투명 효과'
 }
 # UI 옵션 (카탈로그 앱 — 설치되어 있을 때만 켜고 끔)
-$script:AppUiOptions = @('quicklook', 'flow', 'windhawk')
+$script:AppUiOptions = @('quicklook', 'flow', 'windhawk')   # seelen 은 셸 계층(LiteWin.Shell.ps1)이 관리
 
 $script:PersonalizeKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
 $script:StuckRectsKey  = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3'

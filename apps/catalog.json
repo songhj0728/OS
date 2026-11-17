@@ -80,6 +80,11 @@
     { "id": "operagx", "category": "community", "name": "Opera GX", "packages": [ { "source": "winget", "id": "Opera.OperaGX" } ] },
 
     {
+      "id": "seelen", "category": "macui", "name": "Seelen UI — 맥식 상단 메뉴바 + Dock (권장)",
+      "description": "오픈소스(AGPL-3.0). 화면 위 메뉴바(시계·배터리·와이파이·미디어)와 아래 Dock 으로 Windows 작업표시줄을 대신합니다. 맥 UI 모드일 때만 실행",
+      "packages": [ { "source": "winget", "id": "Seelen.SeelenUI" } ]
+    },
+    {
       "id": "quicklook", "category": "macui", "name": "QuickLook (스페이스바 미리보기)",
       "description": "탐색기에서 파일 선택 후 Space 로 미리보기 (맥 Quick Look)",
       "startupMatch": "QuickLook.exe",
