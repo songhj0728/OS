@@ -208,23 +208,24 @@ jobs:
           if ((ConvertTo-LWVersion 'garbage') -ne [version]'0.0.0.0') { exit 1 }
           Write-Host "update repo: $(Get-LWUpdateRepo); current: $((Get-LWVersion).Version)"
 
-      - name: OOBE registration page (Oobe.xml + public key) and choice parsing
+
+      - name: Local accounts (password check, rename, account manager icons)
         shell: powershell
         run: |
-          . .\lib\LiteWin.Oobe.ps1
-          $d = Join-Path $env:RUNNER_TEMP 'oobeinfo'
-          New-LWOobeRegistration -InfoDir $d
-          $x = [xml](Get-Content (Join-Path $d 'Oobe.xml') -Raw -Encoding UTF8)
-          if (-not $x.FirstExperience.oobe.oem.registration.checkbox1.label) { Write-Host '::error::checkbox1 missing'; exit 1 }
-          $b = [IO.File]::ReadAllBytes((Join-Path $d 'Pubkey.blob'))
-          # BLOBHEADER: bType=0x06 PUBLICKEYBLOB, bVersion=2, aiKeyAlg=0x0000A400 CALG_RSA_KEYX, then 'RSA1'
-          if ($b[0] -ne 6 -or $b[1] -ne 2 -or [BitConverter]::ToUInt32($b, 4) -ne 0xA400 -or [Text.Encoding]::ASCII.GetString($b, 8, 4) -ne 'RSA1') { Write-Host "::error::bad pubkey blob"; exit 1 }
-          $lbl = [Security.SecurityElement]::Escape($script:OobeAdminLabel)
-          $cases = @(
-            @{ X = "<UserChoices><checkbox1 label=`"$lbl`" value=`"true`"/></UserChoices>"; E = $true }
-            @{ X = "<UserChoices><checkbox1><label>$lbl</label><value>false</value></checkbox1></UserChoices>"; E = $false }
-            @{ X = "<UserChoices><Choice><Label>$lbl</Label><IsChecked>1</IsChecked></Choice></UserChoices>"; E = $true }
-            @{ X = '<UserChoices/>'; E = $null }
-          )
-          foreach ($c in $cases) { $r = ConvertFrom-LWUserChoices $c.X; if ($r -ne $c.E) { Write-Host "::error::parse $($c.X) -> $r"; exit 1 } }
-          Write-Host 'oobe ok'
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          . .\app\AccountManager.ps1
+          $n = 'lwtest' + (Get-Random -Maximum 9999)
+          try {
+            New-LWAccount -Name $n -Password '' -Admin $false
+            if (Test-LWHasPassword $n) { Write-Host '::error::blank password not detected'; exit 1 }
+            Set-LWAccountPassword -Name $n -Password 'Lw-Test-1234!'
+            if (-not (Test-LWHasPassword $n)) { Write-Host '::error::password not detected'; exit 1 }
+            if (-not (Test-LWPassword -Name $n -Password 'Lw-Test-1234!')) { Write-Host '::error::correct password rejected'; exit 1 }
+            if (Test-LWPassword -Name $n -Password 'wrong') { Write-Host '::error::wrong password accepted'; exit 1 }
+            Rename-LocalUser -Name $n -NewName "$n-r"; $n = "$n-r"
+            $list = @(Get-LWLocalAccounts)
+            if (-not ($list | Where-Object Name -eq $n)) { Write-Host '::error::account list missing test user'; exit 1 }
+            foreach ($a in $list) { $b = New-LWRoundIcon $a.Picture $a.Name 48; if ($b.Width -ne 48) { exit 1 }; $b.Dispose() }
+            if (-not (Test-LWAccountName 'a/b')) { exit 1 }; if (Test-LWAccountName 'user2') { exit 1 }
+            $list | Format-Table Name, IsAdmin, HasPassword, Picture -AutoSize | Out-String | Write-Host
+          } finally { Remove-LocalUser -Name $n -ErrorAction SilentlyContinue }

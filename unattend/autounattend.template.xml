@@ -46,14 +46,30 @@
       </Themes>
       <OOBE>
         <HideEULAPage>true</HideEULAPage>
-        <HideOEMRegistrationScreen>false</HideOEMRegistrationScreen>
+        <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
         <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
-        <HideLocalAccountScreen>false</HideLocalAccountScreen>
+        <HideLocalAccountScreen>true</HideLocalAccountScreen>
         <ProtectYourPC>3</ProtectYourPC>
       </OOBE>
-      <!-- 계정: Windows OOBE 가 로컬 계정 화면(이름·암호)을 띄운다. Microsoft 계정 화면은 숨긴다.
-           그 뒤 LiteWin 등록 페이지(Oobe.xml, 빌드 때 넣음)에서 '기본 제공 Administrator 사용'을 체크할 수 있고,
-           첫 로그인 때 LiteWin 이 그 선택(Oobe\Info\Userchoices.xml)을 읽어 처리한다. -->
+      <!-- 계정: 이름은 자동으로 'user'(관리자 그룹). OOBE 는 계정·이메일·지역을 묻지 않는다.
+           첫 로그인 마법사가 암호 → 'Administrator 로 사용할지' → (암호가 있으면) '같은 암호를 쓸지' 순서로 묻는다.
+           이름은 나중에 LiteWin 설정 > 계정 > 계정 설정 에서 바꿀 수 있다. -->
+      <UserAccounts>
+        <LocalAccounts>
+          <LocalAccount wcm:action="add">
+            <Name>user</Name>
+            <Group>Administrators</Group>
+            <DisplayName>user</DisplayName>
+            <Password><Value></Value><PlainText>true</PlainText></Password>
+          </LocalAccount>
+        </LocalAccounts>
+      </UserAccounts>
+      <AutoLogon>
+        <Enabled>true</Enabled>
+        <LogonCount>1</LogonCount>
+        <Username>user</Username>
+        <Password><Value></Value><PlainText>true</PlainText></Password>
+      </AutoLogon>
       <FirstLogonCommands>
         <SynchronousCommand wcm:action="add">
           <Order>1</Order>

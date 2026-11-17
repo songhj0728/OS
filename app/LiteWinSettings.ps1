@@ -18,7 +18,8 @@ $root = Split-Path -Parent $PSScriptRoot
 . (Join-Path $root 'lib\LiteWin.Theme.ps1')
 . (Join-Path $root 'lib\LiteWin.Activation.ps1')
 . (Join-Path $root 'lib\LiteWin.Update.ps1')
-. (Join-Path $root 'lib\LiteWin.Oobe.ps1')
+. (Join-Path $root 'lib\LiteWin.Accounts.ps1')
+. (Join-Path $root 'app\AccountManager.ps1')
 
 # 관리자 권한으로 다시 실행
 if (-not (Test-LWAdmin)) {
@@ -114,29 +115,30 @@ function Add-CatalogSection($panel, [string]$categoryId, [int]$indent = 0) {
     }
 }
 
-# ============================================================== 탭 0: 계정 (처음 설정 + 나중에도 변경 가능)
-$acct = $true
+# ============================================================== 탭 0: 계정
 $isBuiltinAdmin = ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value -like 'S-1-5-*-500')
 $uacKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
 $uacNoPrompt = ((Get-ItemProperty $uacKey -ErrorAction SilentlyContinue).ConsentPromptBehaviorAdmin -eq 0)
-if ($true) {
-    $p0 = New-Page '계정'
-    if ($FirstRun) { [void](Add-Label $p0 '이 PC 에서 쓸 이름을 정하세요. 비워 두면 "user" 로 만듭니다.' $bold) }
-    else { [void](Add-Label $p0 "현재 계정: $env:USERNAME$(if ($isBuiltinAdmin) { '  (기본 제공 Administrator)' })   — 이름과 암호를 바꾸려면 아래에 입력하세요." $bold) }
-    function New-TextRow($panel, [string]$label, [switch]$Password) {
-        $row = New-Object Windows.Forms.FlowLayoutPanel; $row.AutoSize = $true; $row.WrapContents = $false
-        $row.Margin = New-Object Windows.Forms.Padding(12, 4, 3, 2)
-        $l = New-Object Windows.Forms.Label; $l.Text = $label; $l.Width = 130; $l.Margin = New-Object Windows.Forms.Padding(0, 6, 3, 0)
-        $t = New-Object Windows.Forms.TextBox; $t.Width = 220; if ($Password) { $t.UseSystemPasswordChar = $true }
-        $row.Controls.AddRange(@($l, $t)); $panel.Controls.Add($row); return $t
-    }
-    $txtName  = New-TextRow $p0 '사용자 이름'
-    if (-not $FirstRun) { $txtName.Text = $env:USERNAME }
-    $txtPw    = New-TextRow $p0 $(if ($FirstRun) { '암호 (선택)' } else { '새 암호 (선택)' }) -Password
-    $txtPw2   = New-TextRow $p0 '암호 확인' -Password
-    [void](Add-Label $p0 '    암호를 비워 두면 암호 없이 로그인합니다. 다른 사람이 쓰는 PC 라면 암호를 정하세요.' $small $gray)
+function New-TextRow($panel, [string]$label, [switch]$Password) {
+    $row = New-Object Windows.Forms.FlowLayoutPanel; $row.AutoSize = $true; $row.WrapContents = $false
+    $row.Margin = New-Object Windows.Forms.Padding(12, 4, 3, 2)
+    $l = New-Object Windows.Forms.Label; $l.Text = $label; $l.Width = 130; $l.Margin = New-Object Windows.Forms.Padding(0, 6, 3, 0)
+    $t = New-Object Windows.Forms.TextBox; $t.Width = 220; if ($Password) { $t.UseSystemPasswordChar = $true }
+    $row.Controls.AddRange(@($l, $t)); $panel.Controls.Add($row); return $t
+}
+$script:AdminWarnText1 = "기본 제공 Administrator 계정은 사용자 계정 컨트롤(UAC) 확인 없이 모든 프로그램이 최고 권한으로 실행됩니다.`n`n" +
+    "- 악성 프로그램이 확인 창 없이 시스템 전체를 바꿀 수 있습니다`n- 실수로 시스템 파일을 지워도 막아 주지 않습니다`n- 일부 Store 앱과 보안 기능이 제한될 수 있습니다`n`n계속할까요?"
 
-    [void](Add-Label $p0 '계정 종류' $bold $null 14)
+if (-not $FirstRun) {
+    $p0 = New-Page '계정'
+    [void](Add-Label $p0 "현재 계정: $env:USERNAME$(if ($isBuiltinAdmin) { '  (기본 제공 Administrator)' })" $bold)
+    [void](Add-Label $p0 '계정 추가, 이름·암호 바꾸기는 [계정 설정…] 에서 합니다.' $small $gray)
+    $btnAcct = New-Object Windows.Forms.Button; $btnAcct.Text = '계정 설정…'; $btnAcct.AutoSize = $true
+    $btnAcct.Margin = New-Object Windows.Forms.Padding(12, 4, 3, 8)
+    $btnAcct.add_Click({ Show-LWAccountManager -Owner $form })
+    $p0.Controls.Add($btnAcct)
+
+    [void](Add-Label $p0 '지금 계정의 종류' $bold $null 14)
     $rbAcctUser  = Add-Radio $p0 '관리자 계정 (권장) — 프로그램 설치 등 필요할 때만 확인 창' (-not $uacNoPrompt)
     $rbAcctUser.Font = $font
     $rbAcctNoPrompt = Add-Radio $p0 '확인 창 없는 관리자 — 지금 계정과 파일을 그대로 두고, 관리자 확인 창(UAC)만 묻지 않게' $uacNoPrompt
@@ -159,9 +161,7 @@ if ($true) {
     })
     $rbAcctAdmin.add_CheckedChanged({
         if ($rbAcctAdmin.Checked -and -not $script:adminConfirmed) {
-            $m1 = "기본 제공 Administrator 계정은 사용자 계정 컨트롤(UAC) 확인 없이 모든 프로그램이 최고 권한으로 실행됩니다.`n`n" +
-                  "- 악성 프로그램이 확인 창 없이 시스템 전체를 바꿀 수 있습니다`n- 실수로 시스템 파일을 지워도 막아 주지 않습니다`n- 일부 Store 앱과 보안 기능이 제한될 수 있습니다`n`n계속할까요?"
-            $r1 = [Windows.Forms.MessageBox]::Show($m1, '보안 경고 (1/2)', 'YesNo', 'Warning', 'Button2')
+            $r1 = [Windows.Forms.MessageBox]::Show($script:AdminWarnText1, '보안 경고 (1/2)', 'YesNo', 'Warning', 'Button2')
             $r2 = 'No'
             if ($r1 -eq 'Yes') {
                 $r2 = [Windows.Forms.MessageBox]::Show("한 번 더 확인합니다.`n`n로그아웃 후 Administrator 로 로그인하면 고른 폴더의 파일이 복사되고, '기존 계정 남겨 두기'를 고르지 않았다면 지금 계정('$env:USERNAME')은 지워집니다. Administrator 에는 반드시 암호를 정해야 합니다.`n`n정말 바꿀까요?", '보안 경고 (2/2)', 'YesNo', 'Warning', 'Button2')
@@ -170,31 +170,21 @@ if ($true) {
             $script:adminConfirmed = $true
         }
         $on = $rbAcctAdmin.Checked
-        $txtAdm.Enabled = $on; $txtAdm2.Enabled = $on
-        $txtName.Enabled = -not $on; $txtPw.Enabled = -not $on; $txtPw2.Enabled = -not $on
-        $cbCopyFiles.Enabled = $on; $cbKeepOld.Enabled = $on
+        $txtAdm.Enabled = $on; $txtAdm2.Enabled = $on; $cbCopyFiles.Enabled = $on; $cbKeepOld.Enabled = $on
     })
 
     function Invoke-AccountSetup {
-        <# 창에서 바로 처리한다 (암호를 파일에 남기지 않기 위해). 실패하면 $false #>
-        $name = $txtName.Text.Trim()
-        if (-not $name) { $name = if ($FirstRun) { 'user' } else { $env:USERNAME } }
-        if ($name.Length -gt 20 -or $name -match '["/\\\[\]:;|=,+*?<>@]') {
-            [Windows.Forms.MessageBox]::Show('이름은 20자 이하이고 " / \ [ ] : ; | = , + * ? < > @ 를 쓸 수 없습니다.', 'LiteWin') | Out-Null; return $false
-        }
-        if ($txtPw.Text -ne $txtPw2.Text) { [Windows.Forms.MessageBox]::Show('암호가 서로 다릅니다.', 'LiteWin') | Out-Null; return $false }
+        <# 지금 계정의 종류(UAC / Administrator 전환). 이름·암호는 계정 설정 창에서 바로 적용된다. 실패하면 $false #>
         if ($rbAcctAdmin.Checked) {
             if (-not $txtAdm.Text) { [Windows.Forms.MessageBox]::Show('Administrator 계정에는 암호가 꼭 필요합니다.', 'LiteWin') | Out-Null; return $false }
             if ($txtAdm.Text -ne $txtAdm2.Text) { [Windows.Forms.MessageBox]::Show('Administrator 암호가 서로 다릅니다.', 'LiteWin') | Out-Null; return $false }
         }
         try {
-            $me = $env:USERNAME
             if ($rbAcctAdmin.Checked) {
-                # Administrator 하나만: 켜고 암호를 정한 뒤, 지금 계정은 Administrator 첫 로그인 때 지운다
                 $adm = Get-LocalUser | Where-Object { $_.SID.Value -like 'S-1-5-*-500' } | Select-Object -First 1
                 Set-LocalUser -SID $adm.SID -Password (ConvertTo-SecureString $txtAdm.Text -AsPlainText -Force) -ErrorAction Stop
                 Enable-LocalUser -SID $adm.SID -ErrorAction Stop
-                $script:AdminHandoff = @{ OldUser = $me; Target = $adm.Name; IsAdmin = $true; AutoLogon = $false; CopyFiles = $cbCopyFiles.Checked; KeepOld = $cbKeepOld.Checked; OldProfile = $env:USERPROFILE }
+                $script:AdminHandoff = @{ OldUser = $env:USERNAME; Target = $adm.Name; IsAdmin = $true; AutoLogon = $false; CopyFiles = $cbCopyFiles.Checked; KeepOld = $cbKeepOld.Checked; OldProfile = $env:USERPROFILE }
                 Write-LWLog "Administrator 로 전환 선택 (경고 2회 확인) — 파일 복사 $($cbCopyFiles.Checked), 기존 계정 유지 $($cbKeepOld.Checked)" WARN
                 return $true
             }
@@ -206,10 +196,6 @@ if ($true) {
                 Set-RegValue $uacKey 'PromptOnSecureDesktop' $(if ($want -eq 0) { 0 } else { 1 })
                 Write-LWLog ("관리자 확인 창: " + $(if ($want -eq 0) { '끔 (경고 확인)' } else { '켬' }))
             }
-            if ($name -ne $me) { Rename-LocalUser -Name $me -NewName $name -ErrorAction Stop }
-            Set-LocalUser -Name $name -FullName $name -ErrorAction SilentlyContinue
-            if ($txtPw.Text) { Set-LocalUser -Name $name -Password (ConvertTo-SecureString $txtPw.Text -AsPlainText -Force) -ErrorAction Stop }
-            Write-LWLog "계정 이름: $name (로그아웃 후 표시 반영)"
             return $true
         } catch {
             [Windows.Forms.MessageBox]::Show("계정 설정 실패: $($_.Exception.Message)", 'LiteWin') | Out-Null; return $false
@@ -217,25 +203,29 @@ if ($true) {
     }
 }
 
-# ============================================================== 첫 설정 전용: Administrator 로 사용할지
-#   계정은 Windows 설치 화면(OOBE)의 로컬 계정 화면에서 이미 만들었다.
-#   그 다음 OOBE 의 LiteWin 등록 페이지에서 'Administrator 로 사용'을 체크했으면 여기서 경고 2회 + 암호를 받고 넘긴다.
-#   등록 페이지가 표시되지 않았다면(결과 파일 없음) 같은 체크박스를 이 마법사의 첫 화면에서 묻는다.
+# ============================================================== 첫 설정 전용: 암호 → Administrator 로 사용할지 → 같은 암호를 쓸지
+#   계정 이름은 설치 때 자동으로 'user'. OOBE 는 계정·이메일·지역을 묻지 않는다.
 if ($FirstRun) {
-    $script:OobeAdmin = $null
-    try { $script:OobeAdmin = Get-LWOobeAdminChoice } catch { Write-LWLog "OOBE 선택 읽기 실패: $_" WARN }
     function New-FreePage([string]$title) {
         $page = New-Object Windows.Forms.TabPage $title
         $pn = New-Object Windows.Forms.Panel; $pn.Dock = 'Fill'
         $page.Controls.Add($pn); $tabs.TabPages.Add($page); return $pn
     }
-    # ---- 계정 종류 (OOBE 등록 페이지가 안 나왔을 때만): 설명 + 오른쪽 아래 체크박스 ----
+    # ---- 1) 암호 ----
+    $pPw = New-Page '암호'
+    [void](Add-Label $pPw "계정 이름: $env:USERNAME" $bold)
+    [void](Add-Label $pPw '    이름은 나중에 시작 메뉴 > LiteWin 설정 > 계정 > 계정 설정 에서 바꿀 수 있습니다.' $small $gray)
+    $frPw  = New-TextRow $pPw '암호 (선택)' -Password
+    $frPw2 = New-TextRow $pPw '암호 확인' -Password
+    [void](Add-Label $pPw '    비워 두면 암호 없이 로그인합니다. 다른 사람도 쓰는 PC 라면 암호를 정하세요.' $small $gray)
+    [void](Add-Label $pPw '    Microsoft 계정으로 바뀌지 않는 로컬 계정입니다. Store·Xbox 앱 안에서의 로그인은 그대로 할 수 있습니다.' $small $gray)
+
+    # ---- 2) 계정 종류: 설명 + 오른쪽 아래 체크박스 ----
     $pKind = New-FreePage '계정 종류'
     $kindText = New-Object Windows.Forms.Label
     $kindText.Location = New-Object Drawing.Point(12, 8); $kindText.Size = New-Object Drawing.Size(690, 300)
-    $kindText.Text = "Windows 설치 화면에서 로컬 계정 '$env:USERNAME' 을(를) 만들었습니다.`n`n" +
-        "• 보통은 그대로 [다음] 을 누르세요. 이 계정을 그대로 씁니다 (관리자 권한, 필요할 때만 확인 창).`n`n" +
-        "• 오른쪽 아래를 체크하면 Windows 에 들어 있는 '기본 제공 Administrator' 계정을 쓰고, 방금 만든 계정은 지웁니다.`n" +
+    $kindText.Text = "• 보통은 그대로 [다음] 을 누르세요. 지금 계정('$env:USERNAME', 관리자 권한)을 씁니다.`n  프로그램 설치처럼 시스템을 바꿀 때만 확인 창이 뜹니다.`n`n" +
+        "• 오른쪽 아래를 체크하면 Windows 에 들어 있는 '기본 제공 Administrator' 계정을 쓰고, '$env:USERNAME' 계정은 지웁니다.`n" +
         "  확인 창(UAC) 없이 모든 프로그램이 최고 권한으로 실행되므로 권장하지 않습니다.`n`n" +
         "어느 쪽이든 나중에 시작 메뉴 > LiteWin 설정 > 계정 에서 바꿀 수 있습니다."
     $kindText.Font = New-Object Drawing.Font('Malgun Gothic', 10)
@@ -244,46 +234,51 @@ if ($FirstRun) {
     $pKind.Controls.AddRange(@($kindText, $cbUseAdmin))
     $pKind.add_Resize({ $cbUseAdmin.Location = New-Object Drawing.Point(($pKind.ClientSize.Width - $cbUseAdmin.PreferredSize.Width - 12), ($pKind.ClientSize.Height - $cbUseAdmin.PreferredSize.Height - 8)) })
     $script:frAdminConfirmed = $false
-    function Confirm-UseAdministrator {
-        $m1 = "기본 제공 Administrator 계정은 사용자 계정 컨트롤(UAC) 확인 없이 모든 프로그램이 최고 권한으로 실행됩니다.`n`n" +
-              "- 악성 프로그램이 확인 창 없이 시스템 전체를 바꿀 수 있습니다`n- 실수로 시스템 파일을 지워도 막아 주지 않습니다`n- 일부 Store 앱과 보안 기능이 제한될 수 있습니다`n`n계속할까요?"
-        $r = [Windows.Forms.MessageBox]::Show($m1, '보안 경고 (1/2)', 'YesNo', 'Warning', 'Button2')
-        if ($r -eq 'Yes') {
-            $r = [Windows.Forms.MessageBox]::Show("한 번 더 확인합니다.`n`nAdministrator 계정 하나만 쓰고, 방금 만든 계정('$env:USERNAME')은 지웁니다. Administrator 에는 반드시 암호를 정해야 합니다.`n`n정말 Administrator 로 사용할까요?", '보안 경고 (2/2)', 'YesNo', 'Warning', 'Button2')
-        }
-        return ($r -eq 'Yes')
-    }
     $cbUseAdmin.add_CheckedChanged({
         if (-not $cbUseAdmin.Checked -or $script:frAdminConfirmed) { return }
-        if (Confirm-UseAdministrator) { $script:frAdminConfirmed = $true } else { $cbUseAdmin.Checked = $false }
+        $r = [Windows.Forms.MessageBox]::Show($script:AdminWarnText1, '보안 경고 (1/2)', 'YesNo', 'Warning', 'Button2')
+        if ($r -eq 'Yes') {
+            $r = [Windows.Forms.MessageBox]::Show("한 번 더 확인합니다.`n`nAdministrator 계정 하나만 쓰고 '$env:USERNAME' 계정은 지웁니다. Administrator 에는 반드시 암호가 있어야 합니다.`n`n정말 Administrator 로 사용할까요?", '보안 경고 (2/2)', 'YesNo', 'Warning', 'Button2')
+        }
+        if ($r -eq 'Yes') { $script:frAdminConfirmed = $true } else { $cbUseAdmin.Checked = $false }
     })
-    if ($script:OobeAdmin -eq $true) {
-        # OOBE 등록 페이지에서 체크함 → 마법사를 열기 전에 경고 2회. 취소하면 방금 만든 계정을 그대로 쓴다
-        if (Confirm-UseAdministrator) { $script:frAdminConfirmed = $true; $cbUseAdmin.Checked = $true }
-        else { Write-LWLog 'OOBE 에서 Administrator 를 골랐지만 경고에서 취소 — 만든 계정 유지' }
-    }
 
-    # ---- Administrator 암호 ----
+    # ---- 3) Administrator 암호: 앞에서 정한 암호를 그대로 쓸지 (암호가 없었으면 묻지 않고 새로 정함) ----
     $pAdm = New-Page 'Administrator 암호'
-    [void](Add-Label $pAdm '기본 제공 Administrator 계정의 암호를 정하세요. 반드시 필요합니다.' $bold)
+    $lblAdmHead = Add-Label $pAdm 'Administrator 계정의 암호' $bold
+    $rbAdmSame = Add-Radio $pAdm '앞에서 정한 암호를 그대로 사용' $true; $rbAdmSame.Font = $font
+    $rbAdmNew  = Add-Radio $pAdm '새 암호 정하기' $false; $rbAdmNew.Font = $font
     $frAdm  = New-TextRow $pAdm 'Administrator 암호' -Password
     $frAdm2 = New-TextRow $pAdm '암호 확인' -Password
-    [void](Add-Label $pAdm "    설정을 마치면 로그아웃됩니다. Administrator 로 로그인하면 고른 설정이 적용되고 '$env:USERNAME' 계정은 지워집니다." $small $gray)
+    [void](Add-Label $pAdm "    설정을 마치면 로그아웃됩니다. Administrator 로 로그인하면 고른 설정이 적용되고 '$env:USERNAME' 계정은 지워집니다 (바탕 화면 등의 파일은 복사)." $small $gray)
+    $script:UpdateAdminPwPage = {
+        $hasPw = [bool]$frPw.Text
+        $rbAdmSame.Visible = $hasPw; $rbAdmNew.Visible = $hasPw
+        if (-not $hasPw) { $rbAdmNew.Checked = $true; $lblAdmHead.Text = 'Administrator 계정에는 암호가 꼭 필요합니다. 새 암호를 정하세요.' }
+        else { $lblAdmHead.Text = 'Administrator 계정의 암호' }
+        $frAdm.Enabled = $rbAdmNew.Checked; $frAdm2.Enabled = $rbAdmNew.Checked
+    }
+    $rbAdmNew.add_CheckedChanged({ & $script:UpdateAdminPwPage })
 
     function Invoke-FirstRunAccount {
-        <# Administrator 를 골랐으면 켜고 넘겨줄 정보를 만든다. 아니면 OOBE 에서 만든 계정을 그대로 쓴다. 실패하면 $false #>
-        if (-not $cbUseAdmin.Checked) { return $true }
+        <# 고른 대로 적용: 암호만(user 그대로) 또는 Administrator 로 넘기기. 실패하면 $false #>
+        if ($frPw.Text -ne $frPw2.Text) { [Windows.Forms.MessageBox]::Show('암호가 서로 다릅니다.', 'LiteWin') | Out-Null; $script:AccountStep = '암호'; return $false }
         try {
-            if (-not $frAdm.Text) { [Windows.Forms.MessageBox]::Show('Administrator 계정에는 암호가 꼭 필요합니다.', 'LiteWin') | Out-Null; return $false }
-            if ($frAdm.Text -ne $frAdm2.Text) { [Windows.Forms.MessageBox]::Show('Administrator 암호가 서로 다릅니다.', 'LiteWin') | Out-Null; return $false }
-            $adm = Get-LocalUser | Where-Object { $_.SID.Value -like 'S-1-5-*-500' } | Select-Object -First 1
-            Set-LocalUser -SID $adm.SID -Password (ConvertTo-SecureString $frAdm.Text -AsPlainText -Force) -ErrorAction Stop
-            Enable-LocalUser -SID $adm.SID -ErrorAction Stop
-            $script:AdminHandoff = @{ OldUser = $env:USERNAME; Target = $adm.Name; IsAdmin = $true; AutoLogon = $false; CopyFiles = $true; KeepOld = $false; OldProfile = $env:USERPROFILE }
-            Write-LWLog '첫 설정: 기본 제공 Administrator 사용 (경고 2회 확인)' WARN
+            if ($cbUseAdmin.Checked) {
+                $admPw = if ($frPw.Text -and $rbAdmSame.Checked) { $frPw.Text } else { $frAdm.Text }
+                if (-not $admPw) { [Windows.Forms.MessageBox]::Show('Administrator 계정에는 암호가 꼭 필요합니다.', 'LiteWin') | Out-Null; $script:AccountStep = 'Administrator 암호'; return $false }
+                if (-not ($frPw.Text -and $rbAdmSame.Checked) -and $frAdm.Text -ne $frAdm2.Text) { [Windows.Forms.MessageBox]::Show('Administrator 암호가 서로 다릅니다.', 'LiteWin') | Out-Null; $script:AccountStep = 'Administrator 암호'; return $false }
+                $adm = Get-LocalUser | Where-Object { $_.SID.Value -like 'S-1-5-*-500' } | Select-Object -First 1
+                Set-LocalUser -SID $adm.SID -Password (ConvertTo-SecureString $admPw -AsPlainText -Force) -ErrorAction Stop
+                Enable-LocalUser -SID $adm.SID -ErrorAction Stop
+                $script:AdminHandoff = @{ OldUser = $env:USERNAME; Target = $adm.Name; IsAdmin = $true; AutoLogon = $false; CopyFiles = $true; KeepOld = $false; OldProfile = $env:USERPROFILE }
+                Write-LWLog "첫 설정: 기본 제공 Administrator 사용 (경고 2회 확인, 암호 $(if ($frPw.Text -and $rbAdmSame.Checked) { '그대로 사용' } else { '새로 정함' }))" WARN
+                return $true
+            }
+            if ($frPw.Text) { Set-LWAccountPassword -Name $env:USERNAME -Password $frPw.Text; Write-LWLog "첫 설정: '$env:USERNAME' 암호 설정" }
             return $true
         } catch {
-            [Windows.Forms.MessageBox]::Show("Administrator 설정 실패: $($_.Exception.Message)", 'LiteWin') | Out-Null; return $false
+            [Windows.Forms.MessageBox]::Show("계정 설정 실패: $($_.Exception.Message)", 'LiteWin') | Out-Null; return $false
         }
     }
 }
@@ -738,7 +733,8 @@ function New-SetupWizard {
         설정 창의 각 탭 내용을 그대로 가져와 단계로 보여 주므로, 나중에 LiteWin 설정에서 고치는 내용과 같다.
     #>
     $steps = @(
-        @{ Tab = '계정 종류';  Title = '계정';               Desc = '이 PC 에서 쓸 계정을 정합니다.'; SkipClears = $false; NoSkip = $true; Cond = 'kind' }
+        @{ Tab = '암호';       Title = '계정 암호';          Desc = '계정 이름은 자동으로 정해졌습니다. 암호만 정하세요 (선택).'; SkipClears = $false }
+        @{ Tab = '계정 종류';  Title = '계정 종류';          Desc = '이 PC 에서 쓸 계정을 정합니다.'; SkipClears = $false; NoSkip = $true }
         @{ Tab = 'Administrator 암호'; Title = 'Administrator 계정'; Desc = '기본 제공 Administrator 계정을 켭니다.'; SkipClears = $false; Cond = 'admin'; NoSkip = $true }
         @{ Tab = '브라우저';   Title = '브라우저';           Desc = '기본으로 쓸 브라우저를 고르세요. 다른 브라우저도 함께 설치할 수 있습니다.'; SkipClears = $false }
         @{ Tab = '모드';       Title = '조작 방식과 화면';   Desc = '평소 쓰던 Windows 그대로, 맥처럼 입력, 또는 맥처럼 입력하고 보이게 중에서 고르세요.'; SkipClears = $false }
@@ -776,6 +772,7 @@ function New-SetupWizard {
         $host2.Controls.Clear()
         $pg.Panel.Dock = 'Fill'; $host2.Controls.Add($pg.Panel)
         $title.Text = $pg.Step.Title; $desc.Text = $pg.Step.Desc
+        if ($pg.Step.Cond -eq 'admin' -and $script:UpdateAdminPwPage) { & $script:UpdateAdminPwPage }
         $stepLbl.Text = ('{0} / {1}   ' -f ($nav.I + 1), $pages.Count) + ((0..($pages.Count - 1) | ForEach-Object { if ($_ -eq $nav.I) { '●' } else { '○' } }) -join ' ')
         $bBack.Enabled = $nav.I -gt $nav.First
         $last = $nav.I -eq $pages.Count - 1
@@ -789,8 +786,8 @@ function New-SetupWizard {
         while ($n -ge 0 -and $n -lt $pages.Count -and $pages[$n].Step.Cond) {
             $c = $pages[$n].Step.Cond
             $useAdm = [bool]($cbUseAdmin -and $cbUseAdmin.Checked)
-            # kind: OOBE 등록 페이지 결과가 없을 때만 / admin: Administrator 를 골랐을 때만
-            if (($c -eq 'admin' -and $useAdm) -or ($c -eq 'kind' -and $null -eq $script:OobeAdmin)) { break }
+            # admin: Administrator 를 골랐을 때만
+            if ($c -eq 'admin' -and $useAdm) { break }
             $n += $(if ($delta -lt 0) { -1 } else { 1 })
         }
         if ($n -ge $pages.Count) { Start-Apply $true; return }
@@ -843,9 +840,10 @@ if ($FirstRun) {
     $wiz = . New-SetupWizard
     $script:ActiveForm = $wiz
     function Show-AccountPage {
-        # Administrator 암호 단계로 (없으면 처음 단계로)
+        # 문제가 있던 계정 단계로 (암호 / Administrator 암호)
+        $want = if ($script:AccountStep) { $script:AccountStep } else { '암호' }
         $idx = 0
-        for ($k = 0; $k -lt $script:WizardNav.Pages.Count; $k++) { if ($script:WizardNav.Pages[$k].Step.Cond -eq 'admin') { $idx = $k } }
+        for ($k = 0; $k -lt $script:WizardNav.Pages.Count; $k++) { if ($script:WizardNav.Pages[$k].Step.Tab -eq $want) { $idx = $k } }
         $script:WizardNav.Nav.I = $idx; & $script:WizardNav.Show
     }
     $layout = {

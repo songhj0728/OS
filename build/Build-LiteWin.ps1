@@ -93,7 +93,6 @@ try {
 . (Join-Path $RepoRoot 'lib\LiteWin.Common.ps1')
 . (Join-Path $RepoRoot 'lib\LiteWin.Assoc.ps1')
 . (Join-Path $RepoRoot 'lib\LiteWin.Components.ps1')
-. (Join-Path $RepoRoot 'lib\LiteWin.Oobe.ps1')
 $ChromeMsiUrl = 'https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise64.msi'
 
 # 설치 이미지에 미리 넣을 프로그램 (winget download = 매니페스트의 SHA-256 으로 검증된 공식 설치 파일)
@@ -591,9 +590,6 @@ try {
     foreach ($d in 'lib', 'app', 'apps', 'macstyle') {
         Copy-Item (Join-Path $RepoRoot $d) $lw -Recurse -Force
     }
-    # OOBE: 로컬 계정 화면 다음에 나오는 LiteWin 등록 페이지 ('기본 제공 Administrator 로 사용' 체크박스)
-    try { New-LWOobeRegistration -InfoDir (Join-Path $mountDir 'Windows\System32\oobe\Info'); Info 'OOBE 등록 페이지(Oobe.xml + 공개 키) 추가' }
-    catch { Warn "OOBE 등록 페이지 추가 실패 — 첫 로그인 마법사에서 대신 묻습니다: $_" }
     # 배경화면 + Windows 테마 (설정 > 개인 설정 > 테마 에 'LiteWin …' 으로 나타남)
     #   테마 하나에 배경화면과 다크/라이트 모드가 묶여 있어서, 고르면 둘이 같이 바뀐다 (별도 프로그램 없음)
     #   새 계정 기본값은 autounattend 의 CustomDefaultThemeFile = LiteWin 라이트
