@@ -2,11 +2,9 @@ name: release
 
 # LiteWin 온라인 업데이트 배포.
 #   main 에 push 되거나 수동 실행(workflow_dispatch)하면 LiteWin-update.zip 을 만들어
-#   공개 저장소(기본 songhj0728/LiteWin-releases)의 Release 로 올린다.
+#   이 저장소(공개)의 Release 로 올린다. 별도 토큰 설정은 필요 없다 (GITHUB_TOKEN 사용).
 #   설치된 PC 는 'LiteWin 설정 > 정보 > LiteWin 업데이트 확인' 에서 이것을 받는다.
-# 필요한 설정 (이 저장소 Settings > Secrets and variables > Actions):
-#   secret   LITEWIN_RELEASE_TOKEN : 공개 저장소에 Contents 읽기/쓰기 권한이 있는 fine-grained 토큰
-#   variable RELEASE_REPO (선택)   : 공개 저장소 이름, 기본 songhj0728/LiteWin-releases
+# 선택: 다른 저장소에 올리려면 variable RELEASE_REPO 와 secret LITEWIN_RELEASE_TOKEN 을 설정
 
 on:
   push:
@@ -19,7 +17,7 @@ on:
         default: ''
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: litewin-release
@@ -29,8 +27,8 @@ jobs:
   publish:
     runs-on: windows-latest
     env:
-      GH_TOKEN: ${{ secrets.LITEWIN_RELEASE_TOKEN }}
-      RELEASE_REPO: ${{ vars.RELEASE_REPO || 'songhj0728/LiteWin-releases' }}
+      GH_TOKEN: ${{ secrets.LITEWIN_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+      RELEASE_REPO: ${{ vars.RELEASE_REPO || github.repository }}
       NOTES: ${{ github.event.inputs.notes }}
     steps:
       - uses: actions/checkout@v4
@@ -48,7 +46,7 @@ jobs:
         shell: powershell
         run: |
           if (-not $env:GH_TOKEN) {
-            Write-Host "::warning::LITEWIN_RELEASE_TOKEN secret is not set - package built but not published"
+            Write-Host "::warning::no token - package built but not published"
             exit 0
           }
           $sha = $env:GITHUB_SHA.Substring(0, 7)
@@ -57,7 +55,7 @@ jobs:
           $body = @("LiteWin $env:VERSION (commit $sha)", '', "$msg")
           if ($env:NOTES) { $body += @('', $env:NOTES) }
           $body | Out-File $notesFile -Encoding utf8
-          gh release create "v$env:VERSION" "$env:ZIP" -R $env:RELEASE_REPO --title "LiteWin $env:VERSION" --notes-file $notesFile --latest
+          gh release create "v$env:VERSION" "$env:ZIP" -R $env:RELEASE_REPO --title "LiteWin $env:VERSION" --notes-file $notesFile --target $env:GITHUB_SHA --latest
           if ($LASTEXITCODE) { Write-Host "::error::gh release create failed ($LASTEXITCODE)"; exit 1 }
 
       - uses: actions/upload-artifact@v4

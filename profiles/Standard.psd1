@@ -21,7 +21,7 @@
     # 첫 로그인 마법사(LiteWin 설정)에서 미리 선택해 둘 값. 사용자가 바꿀 수 있다.
     #   Mode: Lite | MacInput | MacUI,  Apps: apps\catalog.json 의 id
     Defaults = @{
-        Mode      = 'MacInput'
+        Mode      = 'Lite'
         UiOptions = @()
         Apps      = @()
     }

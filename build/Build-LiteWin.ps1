@@ -42,7 +42,7 @@
                              LiteWin 코드(설정 앱 등)만 바뀌었다면 ISO 를 다시 만들 필요 없이 설치된 PC 에서
                              'LiteWin 설정 > 정보 > LiteWin 업데이트' 로 받으면 된다.
 .PARAMETER Priority          빌드 중 PC 가 덜 버벅이도록 프로세스 우선순위를 낮춘다: Low(기본, 낮음) / BelowNormal / Normal
-.PARAMETER UpdateRepo        설치된 LiteWin 이 업데이트를 받을 공개 GitHub 저장소 (기본 songhj0728/LiteWin-releases)
+.PARAMETER UpdateRepo        설치된 LiteWin 이 업데이트를 받을 공개 GitHub 저장소 (기본 songhj0728/OS)
 .PARAMETER SetupBackground   Windows 설치 프로그램(디스크 고르는 화면) 배경색. 기본은 배경화면과 어울리는 짙은 청회색 #2B2F38.
                              빈 문자열이면 바꾸지 않는다. -Fast 캐시가 있으면 cache 폴더를 지워야 색이 다시 적용된다.
 .PARAMETER NoChrome          Chrome 을 넣지 않음 (Edge 도 제거하지 않음)
@@ -71,7 +71,7 @@ param(
     [switch]$Fast,
     [switch]$Release,
     [ValidateSet('Low', 'BelowNormal', 'Normal')][string]$Priority = 'Low',
-    [string]$UpdateRepo = 'songhj0728/LiteWin-releases',
+    [string]$UpdateRepo = 'songhj0728/OS',
     [string]$SetupBackground = '#2B2F38',
     [switch]$KeepWorkDir
 )

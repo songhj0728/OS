@@ -141,7 +141,7 @@ function Get-LWProfile {
     <# 빌드 때 저장한 프로필 (없으면 기본값) #>
     $file = Join-Path $script:LWRoot 'profile.json'
     if (Test-Path $file) { try { return (Get-Content $file -Raw -Encoding UTF8 | ConvertFrom-Json) } catch { } }
-    return [pscustomobject]@{ Name = 'Standard'; Defaults = [pscustomobject]@{ Mode = 'MacInput'; Apps = @() } }
+    return [pscustomobject]@{ Name = 'Standard'; Defaults = [pscustomobject]@{ Mode = 'Lite'; Apps = @() } }
 }
 
 # ------------------------------------------------------------------ winget

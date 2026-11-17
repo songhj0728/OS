@@ -1,6 +1,6 @@
 ﻿<#
     LiteWin 온라인 업데이트 — ISO 를 다시 만들지 않고 설치된 PC 의 LiteWin 만 최신으로 바꾼다.
-    공개 저장소(기본 songhj0728/LiteWin-releases)의 최신 Release 에서 LiteWin-update.zip 을 받아
+    공개 저장소(기본 이 저장소 songhj0728/OS)의 최신 Release 에서 LiteWin-update.zip 을 받아
     GitHub 가 제공하는 SHA-256 으로 검증한 뒤 lib/app/apps/macstyle/bin 을 교체한다.
     바뀌지 않는 것: 설치 이미지 단계(지우는 앱, 레지스트리 정책, Edge 제거, 기본 배경) → 이런 변경은 ISO 재빌드가 필요.
 #>
@@ -8,7 +8,7 @@
 
 $script:UpdateConfigFile = Join-Path $script:LWRoot 'update.json'
 $script:VersionFile      = Join-Path $script:LWRoot 'version.json'
-$script:DefaultUpdateRepo = 'songhj0728/LiteWin-releases'
+$script:DefaultUpdateRepo = 'songhj0728/OS'
 
 function Get-LWUpdateRepo {
     if (Test-Path $script:UpdateConfigFile) {

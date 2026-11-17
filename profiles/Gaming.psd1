@@ -20,7 +20,7 @@
     Overrides = @{}
 
     Defaults = @{
-        Mode      = 'MacInput'
+        Mode      = 'Lite'
         UiOptions = @()
         Apps      = @('steam', 'epic', 'discord', 'gpu-driver')
     }
