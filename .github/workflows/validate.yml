@@ -1,0 +1,310 @@
+name: validate
+
+on:
+  push:
+    branches: [ main, 'claude/**' ]
+  pull_request:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      GITHUB_TOKEN: ${{ github.token }}   # GitHub API 호출 한도(비인증 60회/시간) 회피
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          $bad = 0
+          Get-ChildItem -Recurse -Include *.ps1, *.psd1 | ForEach-Object {
+            $tokens = $null; $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors)
+            foreach ($e in $errors) { $bad++; Write-Host "::error file=$($_.FullName),line=$($e.Extent.StartLineNumber)::$($e.Message)" }
+          }
+          Get-ChildItem profiles\*.psd1 | ForEach-Object { [void](Import-PowerShellDataFile $_.FullName) }
+          [void](Get-Content apps\catalog.json -Raw -Encoding UTF8 | ConvertFrom-Json)
+          # PowerShell 5.1: @(... | ConvertFrom-Json) 은 JSON 배열 전체를 항목 하나로 묶는다 (설치 프로그램이 하나도 안 깔리던 원인)
+          Get-ChildItem -Recurse -Include *.ps1 | Select-String -Pattern '@\([^#]*\|\s*ConvertFrom-Json\s*\)' | Where-Object { $_.Line.TrimStart() -notlike '#*' } | ForEach-Object { $bad++; Write-Host "::error file=$($_.Path),line=$($_.LineNumber)::wrap ConvertFrom-Json output in a variable instead of @()" }
+          if ($bad) { exit 1 }
+
+      - name: Compile C# tools (.NET Framework, same as build)
+        shell: powershell
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'bin'
+          $fail = & .\build\Compile-LiteWinTools.ps1 -OutDir $out
+          Get-ChildItem $out
+          if (@($fail).Count) { Write-Host "::error::compile failed: $($fail -join ', ')"; exit 1 }
+
+      - name: Merge default associations (offline logic)
+        shell: powershell
+        run: |
+          . .\lib\LiteWin.Assoc.ps1
+          $out = Join-Path $env:RUNNER_TEMP 'assoc.xml'
+          Merge-DefaultAssociations -Source "$env:WINDIR\System32\OEMDefaultAssociations.xml" -Output $out -Browser @('ChromeHTML', 'Google Chrome') -Entries ([ordered]@{ '.mp4' = @('mpc-be.mp4', 'MPC-BE') })
+          $x = [xml](Get-Content $out -Raw)
+          $edge = @($x.DefaultAssociations.Association | Where-Object { $_.ProgId -like 'MSEdge*' })
+          Write-Host "associations: $(@($x.DefaultAssociations.Association).Count), edge left: $($edge.Count)"
+          if ($edge.Count) { exit 1 }
+
+      - name: Validate AutoHotkey script
+        shell: powershell
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'ahk.zip'; $dir = Join-Path $env:RUNNER_TEMP 'ahk'
+          # autohotkey.com 은 봇 차단(Cloudflare)이 있어 GitHub 공식 릴리스에서 받는다
+          $rel = Invoke-RestMethod -Headers @{ 'User-Agent' = 'litewin-ci'; 'Authorization' = "Bearer $env:GITHUB_TOKEN" } https://api.github.com/repos/AutoHotkey/AutoHotkey/releases/latest
+          $asset = $rel.assets | Where-Object name -like 'AutoHotkey_2*.zip' | Select-Object -First 1
+          Write-Host "AutoHotkey $($rel.tag_name): $($asset.name)"
+          Invoke-WebRequest -UseBasicParsing $asset.browser_download_url -OutFile $zip
+          Expand-Archive $zip $dir -Force
+          $exe = Get-ChildItem $dir -Recurse -Filter AutoHotkey64.exe | Select-Object -First 1 -ExpandProperty FullName
+          $p = Start-Process $exe -ArgumentList '/ErrorStdOut=UTF-8', '/validate', 'macstyle\MacKeys.ahk' -PassThru -NoNewWindow `
+                 -RedirectStandardError "$env:RUNNER_TEMP\ahk.err" -RedirectStandardOutput "$env:RUNNER_TEMP\ahk.out"
+          if (-not $p.WaitForExit(30000)) { $p.Kill(); Write-Host '::warning::AutoHotkey /validate timed out (switch not supported?)'; exit 0 }
+          $p.WaitForExit()
+          $err = (Get-Content "$env:RUNNER_TEMP\ahk.err" -Raw -Encoding UTF8) + (Get-Content "$env:RUNNER_TEMP\ahk.out" -Raw -Encoding UTF8)
+          Write-Host "exit code: $($p.ExitCode)"
+          Write-Host $err
+          if ($err -match '==>|Error') { Write-Host "::error::MacKeys.ahk validation failed"; exit 1 }
+          Write-Host 'MacKeys.ahk OK'
+
+      - name: Smoke-test library functions (no system changes)
+        shell: powershell
+        run: |
+          . .\lib\LiteWin.Apps.ps1
+          . .\macstyle\MacStyleSettings.ps1
+          $c = Get-LWCatalog; Write-Host "catalog apps: $($c.apps.Count)"
+          $b = ConvertTo-MouseCurveBytes @(0.0, 0.43, 1.25, 3.86, 40.0)
+          if ($b.Length -ne 40) { throw "curve bytes = $($b.Length)" }
+          Write-Host 'OK'
+
+      - name: Components manager (ExplorerPatcher release lookup, no install)
+        shell: powershell
+        run: |
+          . .\lib\LiteWin.Components.ps1
+          if ((ConvertTo-EPVersion '22621.3880.66.6_92fce8c') -ne [version]'22621.3880.66.6') { throw 'version parse' }
+          $r = Get-GitHubRelease -Repo $script:EPRepo -Asset $script:EPAsset -DelayDays 7
+          if (-not $r) { throw 'no ExplorerPatcher release found' }
+          Write-Host "ExplorerPatcher $($r.Tag) published $($r.Published) sha256=$($r.Sha256)"
+          $f = Join-Path $env:RUNNER_TEMP 'ep_setup.exe'
+          $h = Save-VerifiedAsset -Release $r -OutFile $f -AllowUnverified
+          Write-Host "downloaded hash $h"
+          if ($r.Sha256 -and $h -ne $r.Sha256) { throw 'hash mismatch' }
+
+      - name: Offline registry access (protected key -> take ownership -> write)
+        shell: powershell
+        run: |
+          . .\lib\LiteWin.Common.ps1
+          . .\build\OfflineRegAccess.ps1
+          Enable-RegTakeOwnership
+          $sub = 'SOFTWARE\LiteWinCiProtected'
+          $hklm = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', 'Default')
+          $k = $hklm.CreateSubKey($sub)
+          # 소유자 SYSTEM, Administrators 는 읽기만 → 보통의 쓰기는 '액세스 거부'
+          $acl = New-Object System.Security.AccessControl.RegistrySecurity
+          $acl.SetAccessRuleProtection($true, $false)
+          $acl.SetOwner((New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')))
+          $acl.AddAccessRule((New-Object System.Security.AccessControl.RegistryAccessRule((New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')), 'FullControl', 'ContainerInherit', 'None', 'Allow')))
+          $acl.AddAccessRule((New-Object System.Security.AccessControl.RegistryAccessRule((New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')), 'ReadKey', 'ContainerInherit', 'None', 'Allow')))
+          $k.SetAccessControl($acl); $k.Close()
+          $path = "Registry::HKEY_LOCAL_MACHINE\$sub"
+          $denied = $false
+          try { New-ItemProperty -LiteralPath $path -Name Probe -Value 1 -PropertyType DWord -Force -ErrorAction Stop | Out-Null } catch { $denied = $true }
+          Write-Host "plain write denied: $denied"
+          $ok = Invoke-OfflineRegWrite -RegPath $path -Action { Set-RegValue -Path $path -Name 'Test' -Value 7 -Type DWord }
+          $v = (Get-ItemProperty -LiteralPath $path -Name Test -ErrorAction SilentlyContinue).Test
+          Write-Host "Invoke-OfflineRegWrite: $ok, value=$v"
+          Remove-Item -LiteralPath $path -Recurse -Force
+          if (-not $ok -or $v -ne 7) { exit 1 }
+
+      - name: Compile in a separate process leaves output unlocked
+        shell: powershell
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'bin2'
+          & "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File .\build\Compile-LiteWinTools.ps1 -OutDir $out | Out-Host
+          foreach ($f in Get-ChildItem $out -Filter *.exe) { Remove-Item $f.FullName -ErrorAction Stop; Write-Host "deleted (not locked): $($f.Name)" }
+
+      - name: GitHub fallback asset patterns (MPC-BE, ImageGlass, RetroBar)
+        shell: powershell
+        run: |
+          . .\lib\LiteWin.Components.ps1
+          $bad = 0
+          foreach ($x in @(
+            @{ Repo = 'Aleksoid1978/MPC-BE'; Pattern = 'x64.*installer.*\.(zip|exe)$' }
+            @{ Repo = 'd2phap/ImageGlass';   Pattern = 'x64\.msi$' }
+            @{ Repo = 'dremin/RetroBar';     Pattern = 'Installer\.(zip|exe)$' }
+          )) {
+            $r = Get-GitHubRelease -Repo $x.Repo -AssetPattern $x.Pattern -DelayDays 0
+            if ($r) { Write-Host "$($x.Repo): $($r.Tag) $($r.AssetName) sha256=$($r.Sha256)" } else {
+              $names = ((Invoke-RestMethod -Headers @{ 'User-Agent' = 'litewin-ci'; 'Authorization' = "Bearer $env:GITHUB_TOKEN" } "https://api.github.com/repos/$($x.Repo)/releases/latest").assets | ForEach-Object name) -join ', '
+              Write-Host "::error::no asset for $($x.Repo). available: $names"; $bad++
+            }
+          }
+          if ($bad) { exit 1 }
+
+      - name: Default theme file is set in unattend template
+        shell: powershell
+        run: |
+          $x = [xml](Get-Content unattend\autounattend.template.xml -Raw)
+          $ns = New-Object Xml.XmlNamespaceManager $x.NameTable; $ns.AddNamespace('u', 'urn:schemas-microsoft-com:unattend')
+          $t = $x.SelectSingleNode('//u:CustomDefaultThemeFile', $ns)
+          if (-not $t -or $t.InnerText -notlike '*LiteWinLight.theme') { throw 'CustomDefaultThemeFile missing' }
+          Write-Host "default theme: $($t.InnerText)"
+
+      - name: Setup background image (bmp/png templates keep size and format)
+        shell: powershell
+        run: |
+          . .\build\SetupBackground.ps1
+          $c = ConvertFrom-HexColor '#2B2F38'
+          $dir = Join-Path $env:RUNNER_TEMP 'bg'; New-Item -ItemType Directory $dir -Force | Out-Null
+          foreach ($ext in 'bmp', 'png') {
+            $tpl = Join-Path $dir "background_cli.$ext"
+            $b = New-Object System.Drawing.Bitmap 1024, 768; $b.Save($tpl, $(if ($ext -eq 'png') { [System.Drawing.Imaging.ImageFormat]::Png } else { [System.Drawing.Imaging.ImageFormat]::Bmp })); $b.Dispose()
+            $out = Join-Path $dir "out.$ext"
+            $r = New-SolidImageLike -Template $tpl -Color $c -OutFile $out
+            Remove-Item $tpl -ErrorAction Stop   # 템플릿이 잠기지 않았는지
+            $im = [System.Drawing.Image]::FromFile($out); $px = ([System.Drawing.Bitmap]$im).GetPixel(5, 5); $sz = $im.Size; $im.Dispose()
+            Write-Host "$ext -> $($sz.Width)x$($sz.Height) pixel=$($px.R),$($px.G),$($px.B)"
+            if ($sz.Width -ne 1024 -or $px.R -ne 0x2B -or $px.G -ne 0x2F -or $px.B -ne 0x38) { exit 1 }
+          }
+
+      - name: Build script preflight (loads every helper, stops at the missing-ISO check)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'   # 예상된 오류(ISO 없음)가 stderr 로 나오므로 여기서 멈추지 않게
+          $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build\Build-LiteWin.ps1 -IsoPath C:\no-such.iso -NoIso 2>&1 | Out-String
+          Write-Host $out
+          # (워크플로 스크립트는 5.1 에서 ANSI 로 읽혀 한글 패턴이 깨지므로 ASCII 로 확인: ISO 확인 줄에서 던진 오류인지)
+          if ($out -notmatch 'OperationStopped.*no-such\.iso') { Write-Host '::error::build script failed before the ISO check'; exit 1 }
+          Write-Host 'preflight OK: script loaded up to the ISO check'
+          exit 0   # 자식 powershell 의 종료 코드(1)가 이 단계 결과로 남지 않게
+
+      - name: Theme helper (parse .theme files, compile wallpaper API)
+        shell: powershell
+        run: |
+          . .\lib\LiteWin.Theme.ps1
+          $t = @(Get-LWThemes)
+          $t | ForEach-Object { Write-Host "$($_.Name) dark=$($_.Dark) wp=$($_.Wallpaper)" }
+          if (-not ('LiteWin.Desktop' -as [type])) { throw 'Desktop type missing' }
+
+      - name: Activation diagnostics (read-only status + error text)
+        shell: powershell
+        run: |
+          . .\lib\LiteWin.Activation.ps1
+          $st = Get-LWActivationStatus
+          Write-Host "status: $($st.Text) channel=$($st.Channel)"
+          Write-Host (Get-ActivationErrorText 'error 0x80072F8F happened')
+          Write-Host "clock skew (min): $(Test-LWClock)"
+
+      - name: Online update package + version compare
+        shell: powershell
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'upd'
+          $zip = & .\tools\New-UpdatePackage.ps1 -OutDir $out -Version '2026.1.2.3' -Commit 'test'
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $names = [IO.Compression.ZipFile]::OpenRead($zip).Entries.FullName -replace '\\', '/'
+          foreach ($n in 'version.json', 'lib/LiteWin.Common.ps1', 'lib/LiteWin.Update.ps1', 'app/LiteWinSettings.ps1', 'bin/LiteWinSettings.exe') {
+            if ($names -notcontains $n) { Write-Host "::error::update zip missing $n"; exit 1 }
+          }
+          . .\lib\LiteWin.Update.ps1
+          if (-not ((ConvertTo-LWVersion 'v2026.11.17.5') -gt (ConvertTo-LWVersion '2026.11.17.0'))) { exit 1 }
+          if (-not ((ConvertTo-LWVersion 'v2026.11.18.1') -gt (ConvertTo-LWVersion '2026.11.17.9'))) { exit 1 }
+          if ((ConvertTo-LWVersion 'garbage') -ne [version]'0.0.0.0') { exit 1 }
+          Write-Host "update repo: $(Get-LWUpdateRepo); current: $((Get-LWVersion).Version)"
+
+
+      - name: Local accounts (password check, rename, account manager icons)
+        shell: powershell
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          . .\app\AccountManager.ps1
+          $n = 'lwtest' + (Get-Random -Maximum 9999)
+          try {
+            New-LWAccount -Name $n -Password '' -Admin $false
+            Write-Host ("logon codes: blank={0} wrong={1}" -f [LiteWin.Logon]::Check($n, '', 3), [LiteWin.Logon]::Check($n, 'x', 3))
+            if (Test-LWHasPassword $n) { Write-Host '::error::blank password not detected'; exit 1 }
+            Set-LWAccountPassword -Name $n -Password 'Lw-Test-1234!'
+            if (-not (Test-LWHasPassword $n)) { Write-Host '::error::password not detected'; exit 1 }
+            if (-not (Test-LWPassword -Name $n -Password 'Lw-Test-1234!')) { Write-Host '::error::correct password rejected'; exit 1 }
+            if (Test-LWPassword -Name $n -Password 'wrong') { Write-Host '::error::wrong password accepted'; exit 1 }
+            Rename-LocalUser -Name $n -NewName "$n-r"; $n = "$n-r"
+            $list = @(Get-LWLocalAccounts)
+            if (-not ($list | Where-Object Name -eq $n)) { Write-Host '::error::account list missing test user'; exit 1 }
+            foreach ($a in $list) { $b = New-LWRoundIcon $a.Picture $a.Name 48; if ($b.Width -ne 48) { exit 1 }; $b.Dispose() }
+            if (-not (Test-LWAccountName 'a/b')) { exit 1 }; if (Test-LWAccountName 'user2') { exit 1 }
+            $list | Format-Table Name, IsAdmin, HasPassword, Picture -AutoSize | Out-String | Write-Host
+          } finally { Remove-LocalUser -Name $n -ErrorAction SilentlyContinue }
+
+
+      - name: Registry snapshot save/restore (several entries incl. binary)
+        shell: powershell
+        run: |
+          . .\lib\LiteWin.Common.ps1
+          $k = 'HKCU:\Software\LiteWinTest\Snap'
+          Set-RegValue $k 'Bin' ([byte[]](1..48)) Binary; Set-RegValue $k 'Num' 7; Set-RegValue $k 'Str' 'a' String
+          Save-RegSnapshot -Name 'citest' -Force -Entries @(@{ Path = $k; Name = 'Bin' }, @{ Path = $k; Name = 'Num' }, @{ Path = $k; Name = 'Str' }, @{ Path = $k; Name = 'Missing' })
+          Set-RegValue $k 'Bin' ([byte[]](9, 9)) Binary; Set-RegValue $k 'Num' 1; Set-RegValue $k 'Missing' 5
+          if (-not (Restore-RegSnapshot -Name 'citest')) { exit 1 }
+          $p = Get-ItemProperty $k
+          if ($p.Bin.Length -ne 48 -or $p.Num -ne 7 -or $p.Str -ne 'a' -or $null -ne $p.Missing) { Write-Host "::error::snapshot restore wrong: $($p | Out-String)"; exit 1 }
+          Remove-Item 'HKCU:\Software\LiteWinTest' -Recurse -Force
+          Write-Host 'snapshot ok'
+
+  shell-payloads:
+    # 빌드 → 설치 마지막 단계(SYSTEM) → 사용자 로그인 순서를 그대로 재현해서 RetroBar / Open-Shell 이 실제로 깔리고 뜨는지 확인
+    runs-on: windows-latest
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download payloads exactly like the build
+        shell: powershell
+        run: |
+          . .\lib\LiteWin.Common.ps1; . .\lib\LiteWin.Components.ps1
+          $Fast = $false; $tmpDir = Join-Path $env:RUNNER_TEMP 'pl'; $dlCache = $tmpDir
+          function Test-FreshFile { $false }; function Warn($m) { Write-Host "::warning::$m" }; function Info($m) { Write-Host "    $m" }
+          . .\build\Payloads.ps1
+          $Payloads = @($Payloads | Where-Object { $_.Name -in 'dotnet-desktop', 'retrobar', 'openshell' })
+          $dest = Join-Path $env:RUNNER_TEMP 'payload'; New-Item -ItemType Directory $dest -Force | Out-Null
+          $list = @(Save-WingetPayloads -Dest $dest)
+          ConvertTo-Json -InputObject $list -Depth 3 | Out-File (Join-Path $dest 'payloads.json') -Encoding utf8
+          Get-Content (Join-Path $dest 'payloads.json')
+          Get-ChildItem $dest | Format-Table Name, Length | Out-String | Write-Host
+          Get-ChildItem $tmpDir -Recurse -Filter *.yaml | ForEach-Object { Write-Host "--- $($_.FullName)"; Select-String -Path $_.FullName -Pattern 'InstallerType|Scope|Silent|InstallerUrl' | ForEach-Object { Write-Host $_.Line } }
+
+      - name: Install as SYSTEM (same as SetupComplete)
+        shell: powershell
+        run: |
+          $dest = Join-Path $env:RUNNER_TEMP 'payload'; $log = Join-Path $env:RUNNER_TEMP 'install.log'
+          $ps1 = Join-Path $env:RUNNER_TEMP 'install.ps1'
+          "`$ErrorActionPreference='Continue'; . '$pwd\lib\LiteWin.Payloads.ps1'; Install-LWPayloads -PayloadDir '$dest' *>&1 | Out-File '$log' -Encoding utf8" | Set-Content $ps1 -Encoding UTF8
+          $act = New-ScheduledTaskAction -Execute powershell.exe -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$ps1`""
+          Register-ScheduledTask -TaskName LWPayloadTest -Action $act -User 'NT AUTHORITY\SYSTEM' -RunLevel Highest -Force | Out-Null
+          Start-ScheduledTask -TaskName LWPayloadTest
+          $t0 = Get-Date
+          do { Start-Sleep 5; $st = (Get-ScheduledTask -TaskName LWPayloadTest).State } while ($st -eq 'Running' -and ((Get-Date) - $t0).TotalMinutes -lt 25)
+          Write-Host "task state: $st, result: $((Get-ScheduledTaskInfo -TaskName LWPayloadTest).LastTaskResult)"
+          if (Test-Path $log) { Get-Content $log | Write-Host }
+          foreach ($p in "$env:ProgramFiles\RetroBar\RetroBar.exe", "$env:ProgramFiles\Open-Shell\StartMenu.exe") { Write-Host ("{0}: {1}" -f $p, (Test-Path $p)) }
+          Get-ChildItem "$env:ProgramFiles\dotnet\shared\Microsoft.WindowsDesktop.App" -Directory -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "WindowsDesktop.App $($_.Name)" }
+          Get-ChildItem "$env:WINDIR\System32\config\systemprofile\AppData\Local\Programs" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "systemprofile Programs: $($_.Name)" }
+
+      - name: Start RetroBar and Open-Shell as the user
+        shell: powershell
+        run: |
+          $bad = 0
+          $rb = "$env:ProgramFiles\RetroBar\RetroBar.exe"
+          if (Test-Path $rb) {
+            $p = Start-Process $rb -PassThru; Start-Sleep 15
+            if ($p.HasExited) { Write-Host "::error::RetroBar exited (code $($p.ExitCode))"; $bad++ } else { Write-Host 'RetroBar running'; $p | Stop-Process -Force }
+            Get-ChildItem "$env:LOCALAPPDATA\RetroBar" -Recurse -Filter *.log -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "--- $($_.Name)"; Get-Content $_.FullName -Tail 30 | Write-Host }
+          } else { Write-Host '::error::RetroBar.exe not installed'; $bad++ }
+          $os = "$env:ProgramFiles\Open-Shell\StartMenu.exe"
+          if (Test-Path $os) {
+            Start-Process $os -ArgumentList '-autorun'; Start-Sleep 8
+            if (Get-Process StartMenu -ErrorAction SilentlyContinue) { Write-Host 'Open-Shell StartMenu running' } else { Write-Host '::error::Open-Shell StartMenu not running'; $bad++ }
+            Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' | Format-List | Out-String | Write-Host
+          } else { Write-Host '::error::Open-Shell not installed'; $bad++ }
+          Get-Process explorer -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "explorer pid $($_.Id) session $($_.SessionId)" }
+          if ($bad) { exit 1 }
